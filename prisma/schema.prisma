@@ -1,0 +1,530 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =====================================================================
+// ENUMS
+// =====================================================================
+
+enum UserRole {
+  VIEWER
+  CREATOR
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum CreatorVerificationStatus {
+  UNVERIFIED
+  VERIFIED
+}
+
+enum CreatorStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum VideoType {
+  LONG_FORM
+  SHORT_FORM
+}
+
+enum Visibility {
+  PUBLIC
+  UNLISTED
+  PRIVATE
+}
+
+enum VideoStatus {
+  DRAFT
+  UPLOADING
+  UPLOADED
+  PROCESSING
+  READY
+  SCHEDULED
+  PUBLISHED
+  FAILED
+  DELETED
+}
+
+enum MediaAssetType {
+  ORIGINAL_VIDEO
+  ORIGINAL_IMAGE
+  THUMBNAIL
+  PREVIEW_CLIP
+  HLS_MASTER_MANIFEST
+  AVATAR
+  OTHER
+}
+
+enum StorageProvider {
+  AZURE_BLOB
+  S3
+  GCS
+  LOCAL
+}
+
+enum AssetStatus {
+  PENDING
+  UPLOADING
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+  DELETED
+}
+
+enum VideoVariantStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum MediaJobType {
+  TRANSCODE
+  THUMBNAIL
+  PREVIEW
+}
+
+enum MediaJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  RETRYING
+}
+
+enum NotificationType {
+  NEW_FOLLOWER
+  NEW_VIDEO_FROM_FOLLOWED
+  COMMENT_REPLY
+  VIDEO_LIKED
+  VIDEO_COMMENTED
+  SYSTEM
+}
+
+// =====================================================================
+// 1. CORE USER DOMAIN
+// =====================================================================
+
+model User {
+  id            String        @id @default(uuid())
+  clerkUserId   String        @unique
+  role          UserRole      @default(VIEWER)
+  accountStatus AccountStatus @default(ACTIVE)
+  createdAt     DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime      @updatedAt @db.Timestamptz(6)
+  deletedAt     DateTime?     @db.Timestamptz(6)
+
+  profile        Profile?
+  settings       UserSettings?
+  creatorProfile CreatorProfile?
+
+  follows            Follow[]        @relation("UserFollows")
+  videoLikes         VideoLike[]
+  comments           Comment[]
+  commentLikes       CommentLike[]
+  savedVideos        SavedVideo[]
+  watchLater         WatchLater[]
+  watchHistory       WatchHistory[]
+  watchProgress      WatchProgress[]
+  notifications      Notification[]  @relation("NotificationRecipient")
+  actorNotifications Notification[]  @relation("NotificationActor")
+
+  @@map("users")
+}
+
+model Profile {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  displayName   String
+  username      String   @unique
+  avatarAssetId String?  @unique
+  biography     String?
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @db.Timestamptz(6)
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  avatarAsset MediaAsset? @relation(fields: [avatarAssetId], references: [id], onDelete: SetNull)
+
+  @@index([username])
+  @@map("profiles")
+}
+
+model UserSettings {
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  emailNotifications Boolean  @default(true)
+  pushNotifications  Boolean  @default(true)
+  privateAccount     Boolean  @default(false)
+  preferredLanguage  String   @default("en")
+  createdAt          DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model CreatorProfile {
+  id                 String                    @id @default(uuid())
+  userId             String                    @unique
+  channelName        String                    @unique
+  verificationStatus CreatorVerificationStatus @default(UNVERIFIED)
+  status             CreatorStatus             @default(ACTIVE)
+  bannerAssetId      String?                   @unique
+  aboutText          String?
+  createdAt          DateTime                  @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime                  @updatedAt @db.Timestamptz(6)
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bannerAsset MediaAsset? @relation(fields: [bannerAssetId], references: [id], onDelete: SetNull)
+
+  videos        Video[]
+  followers     Follow[]       @relation("CreatorFollowers")
+  notifications Notification[]
+
+  @@index([verificationStatus])
+  @@map("creator_profiles")
+}
+
+// =====================================================================
+// 2. MEDIA STORAGE REFERENCE (Azure Blob metadata only — never raw bytes)
+// =====================================================================
+
+model MediaAsset {
+  id              String          @id @default(uuid())
+  type            MediaAssetType
+  storageProvider StorageProvider @default(AZURE_BLOB)
+  container       String
+  blobPath        String
+  mimeType        String?
+  sizeBytes       BigInt?
+  checksum        String?
+  width           Int?
+  height          Int?
+  durationMs      BigInt?
+  status          AssetStatus     @default(PENDING)
+  createdAt       DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @db.Timestamptz(6)
+
+  profileAvatarOf    Profile?
+  creatorBannerOf    CreatorProfile?
+  videoOriginalOf    Video?          @relation("VideoOriginalAsset")
+  videoThumbnailOf   Video?          @relation("VideoThumbnailAsset")
+  videoPreviewOf     Video?          @relation("VideoPreviewAsset")
+  videoHlsManifestOf Video?          @relation("VideoHlsManifestAsset")
+  variantOf          VideoVariant?
+
+  @@unique([container, blobPath])
+  @@index([type, status])
+  @@map("media_assets")
+}
+
+// =====================================================================
+// 3. VIDEO DOMAIN
+// =====================================================================
+
+model Video {
+  id          String      @id @default(uuid())
+  creatorId   String
+  type        VideoType
+  title       String
+  description String?
+  visibility  Visibility  @default(PUBLIC)
+  status      VideoStatus @default(DRAFT)
+  durationMs  BigInt?
+
+  originalAssetId    String? @unique
+  thumbnailAssetId   String? @unique
+  previewAssetId     String? @unique
+  hlsManifestAssetId String? @unique
+
+  categoryId String?
+
+  // Denormalized fast-read counters. No event log yet — added when analytics/recommendation work starts.
+  viewCount    BigInt @default(0)
+  likeCount    BigInt @default(0)
+  commentCount BigInt @default(0)
+
+  publishedAt DateTime? @db.Timestamptz(6)
+  scheduledAt DateTime? @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt   DateTime? @db.Timestamptz(6)
+
+  creator          CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  category         Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  originalAsset    MediaAsset?    @relation("VideoOriginalAsset", fields: [originalAssetId], references: [id], onDelete: SetNull)
+  thumbnailAsset   MediaAsset?    @relation("VideoThumbnailAsset", fields: [thumbnailAssetId], references: [id], onDelete: SetNull)
+  previewAsset     MediaAsset?    @relation("VideoPreviewAsset", fields: [previewAssetId], references: [id], onDelete: SetNull)
+  hlsManifestAsset MediaAsset?    @relation("VideoHlsManifestAsset", fields: [hlsManifestAssetId], references: [id], onDelete: SetNull)
+
+  variants       VideoVariant[]
+  tags           VideoTag[]
+  likes          VideoLike[]
+  comments       Comment[]
+  savedBy        SavedVideo[]
+  watchLaterBy   WatchLater[]
+  watchHistory   WatchHistory[]
+  watchProgress  WatchProgress[]
+  processingJobs MediaProcessingJob[]
+  notifications  Notification[]
+
+  @@index([creatorId, status])
+  @@index([type, visibility, status])
+  @@index([publishedAt])
+  @@index([scheduledAt])
+  @@map("videos")
+}
+
+model VideoVariant {
+  id          String             @id @default(uuid())
+  videoId     String
+  assetId     String             @unique
+  label       String
+  width       Int
+  height      Int
+  bitrateKbps Int?
+  codec       String?
+  container   String?
+  sizeBytes   BigInt?
+  status      VideoVariantStatus @default(PENDING)
+  createdAt   DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime           @updatedAt @db.Timestamptz(6)
+
+  video Video      @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  asset MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, label])
+  @@index([videoId, status])
+  @@map("video_variants")
+}
+
+// =====================================================================
+// 4. DISCOVERY (TAGS / CATEGORIES — basic search metadata)
+// =====================================================================
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  videos Video[]
+
+  @@map("categories")
+}
+
+model Tag {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  videos VideoTag[]
+
+  @@map("tags")
+}
+
+model VideoTag {
+  id      String @id @default(uuid())
+  videoId String
+  tagId   String
+
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, tagId])
+  @@index([tagId])
+  @@map("video_tags")
+}
+
+// =====================================================================
+// 5. SOCIAL DOMAIN
+// =====================================================================
+
+model Follow {
+  id         String   @id @default(uuid())
+  followerId String
+  creatorId  String
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  follower User           @relation("UserFollows", fields: [followerId], references: [id], onDelete: Cascade)
+  creator  CreatorProfile @relation("CreatorFollowers", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, creatorId])
+  @@index([creatorId])
+  @@map("follows")
+}
+
+model VideoLike {
+  id        String   @id @default(uuid())
+  userId    String
+  videoId   String
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, videoId])
+  @@index([videoId])
+  @@map("video_likes")
+}
+
+model Comment {
+  id              String    @id @default(uuid())
+  videoId         String
+  userId          String
+  parentCommentId String?
+  body            String
+  likeCount       BigInt    @default(0)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt       DateTime? @db.Timestamptz(6)
+
+  video         Video         @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentComment Comment?      @relation("CommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
+  replies       Comment[]     @relation("CommentReplies")
+  likes         CommentLike[]
+
+  @@index([videoId, createdAt])
+  @@index([parentCommentId])
+  @@map("comments")
+}
+
+model CommentLike {
+  id        String   @id @default(uuid())
+  userId    String
+  commentId String
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, commentId])
+  @@index([commentId])
+  @@map("comment_likes")
+}
+
+model SavedVideo {
+  id        String   @id @default(uuid())
+  userId    String
+  videoId   String
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, videoId])
+  @@index([userId])
+  @@map("saved_videos")
+}
+
+model WatchLater {
+  id        String   @id @default(uuid())
+  userId    String
+  videoId   String
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, videoId])
+  @@index([userId])
+  @@map("watch_later")
+}
+
+// =====================================================================
+// 6. WATCHING / PLAYBACK
+// =====================================================================
+
+model WatchHistory {
+  id        String   @id @default(uuid())
+  userId    String
+  videoId   String
+  watchedAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@index([userId, watchedAt])
+  @@index([videoId])
+  @@map("watch_history")
+}
+
+model WatchProgress {
+  id                String   @id @default(uuid())
+  userId            String
+  videoId           String
+  positionMs        BigInt   @default(0)
+  completionPercent Decimal  @default(0) @db.Decimal(5, 2)
+  completed         Boolean  @default(false)
+  lastWatchedAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, videoId])
+  @@index([userId, lastWatchedAt])
+  @@map("watch_progress")
+}
+
+// =====================================================================
+// 7. MEDIA PROCESSING PIPELINE (upload processing state)
+// =====================================================================
+
+model MediaProcessingJob {
+  id             String         @id @default(uuid())
+  videoId        String
+  type           MediaJobType
+  status         MediaJobStatus @default(QUEUED)
+  retryCount     Int            @default(0)
+  idempotencyKey String         @unique
+  errorMessage   String?
+  queuedAt       DateTime       @default(now()) @db.Timestamptz(6)
+  startedAt      DateTime?      @db.Timestamptz(6)
+  completedAt    DateTime?      @db.Timestamptz(6)
+
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@index([videoId, type])
+  @@index([status])
+  @@map("media_processing_jobs")
+}
+
+// =====================================================================
+// 8. NOTIFICATIONS
+// =====================================================================
+
+model Notification {
+  id          String           @id @default(uuid())
+  recipientId String
+  actorId     String?
+  type        NotificationType
+  title       String
+  body        String?
+  payload     Json?
+  videoId     String?
+  creatorId   String?
+  readAt      DateTime?        @db.Timestamptz(6)
+  createdAt   DateTime         @default(now()) @db.Timestamptz(6)
+
+  recipient User            @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor     User?           @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  video     Video?          @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  creator   CreatorProfile? @relation(fields: [creatorId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId, readAt])
+  @@map("notifications")
+}
