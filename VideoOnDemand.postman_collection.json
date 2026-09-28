@@ -1,0 +1,226 @@
+{
+  "info": {
+    "name": "Video On Demand API",
+    "description": "Video-on-demand backend: Clerk-authenticated user/profile/video endpoints. Auth is handled by Clerk on the client — obtain a session token from the Expo app (e.g. log `await getToken()` during dev) or the Clerk dashboard, and paste it into the `clerk_token` collection variable.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000" },
+    { "key": "clerk_token", "value": "" },
+    { "key": "video_id", "value": "" },
+    { "key": "username", "value": "jane_doe" },
+    { "key": "blob_name", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Me",
+      "item": [
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{clerk_token}}" }],
+            "url": { "raw": "{{base_url}}/api/me", "host": ["{{base_url}}"], "path": ["api", "me"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Profile",
+      "item": [
+        {
+          "name": "Get Public Profile by Username",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/{{username}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "{{username}}"]
+            }
+          }
+        },
+        {
+          "name": "Update Own Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{clerk_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"Jane D.\",\n  \"biology\": \"New bio text\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/profile", "host": ["{{base_url}}"], "path": ["api", "profile"] }
+          }
+        },
+        {
+          "name": "Become a Creator",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{clerk_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channelName\": \"JaneDoeVlogs\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/creator-profile", "host": ["{{base_url}}"], "path": ["api", "creator-profile"] }
+          }
+        },
+        {
+          "name": "Request Avatar Upload URL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.collectionVariables.set('blob_name', json.data.blobName);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{clerk_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fileExtension\": \".jpg\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/profile/avatar", "host": ["{{base_url}}"], "path": ["api", "profile", "avatar"] }
+          }
+        },
+        {
+          "name": "Confirm Avatar Upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{clerk_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"blobName\": \"{{blob_name}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/profile/avatar/confirm",
+              "host": ["{{base_url}}"],
+              "path": ["api", "profile", "avatar", "confirm"]
+            }
+          },
+          "description": "Note: this will fail with 400 unless the blob at blob_name was actually uploaded to Azure first (Postman can't do the direct-to-Azure PUT step automatically in this flow — upload manually via the 'uploadUrl' returned by the previous request, e.g. with curl, before running this)."
+        }
+      ]
+    },
+    {
+      "name": "Videos",
+      "item": [
+        {
+          "name": "Init Video Upload",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.collectionVariables.set('video_id', json.data.videoId);",
+                  "    pm.collectionVariables.set('blob_name', json.data.blobPath);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{clerk_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"My First Vlog\",\n  \"description\": \"Optional description\",\n  \"type\": \"LONG_FORM\",\n  \"visibility\": \"PUBLIC\",\n  \"fileExtension\": \"mp4\",\n  \"mimeType\": \"video/mp4\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/videos/init", "host": ["{{base_url}}"], "path": ["api", "videos", "init"] }
+          },
+          "description": "Requires the caller to already be a creator (run 'Become a Creator' first). Returns a SAS uploadUrl — upload the raw video file to it directly (not through this backend) before calling Complete Video Upload."
+        },
+        {
+          "name": "Complete Video Upload",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{clerk_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/videos/{{video_id}}/complete",
+              "host": ["{{base_url}}"],
+              "path": ["api", "videos", "{{video_id}}", "complete"]
+            }
+          }
+        },
+        {
+          "name": "List My Videos",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{clerk_token}}" }],
+            "url": { "raw": "{{base_url}}/api/videos/mine", "host": ["{{base_url}}"], "path": ["api", "videos", "mine"] }
+          }
+        },
+        {
+          "name": "Get Video by ID",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{clerk_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/videos/{{video_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "videos", "{{video_id}}"]
+            },
+            "description": "Authorization header is optional for public videos, required to view your own PRIVATE videos."
+          }
+        },
+        {
+          "name": "Update Video Metadata",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{clerk_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"New title\",\n  \"visibility\": \"UNLISTED\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/videos/{{video_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "videos", "{{video_id}}"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

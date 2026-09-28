@@ -62,6 +62,7 @@ enum MediaAssetType {
   PREVIEW_CLIP
   HLS_MASTER_MANIFEST
   AVATAR
+  BANNER
   OTHER
 }
 
@@ -255,6 +256,7 @@ model Video {
   viewCount    BigInt @default(0)
   likeCount    BigInt @default(0)
   commentCount BigInt @default(0)
+  shareCount   BigInt @default(0)
 
   publishedAt DateTime? @db.Timestamptz(6)
   scheduledAt DateTime? @db.Timestamptz(6)

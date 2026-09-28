@@ -2,6 +2,7 @@ import "dotenv/config";
 import { prisma } from "../config/db";
 import { JobService } from "../services/job.service";
 import { MediaProcessingService } from "../services/media-processing.service";
+import { NotificationService } from "../services/notification.service";
 
 /**
  * This file is a SEPARATE PROCESS from the API server — you run it with
@@ -154,21 +155,32 @@ const processThumbnailJob = async (job: Job) => {
  */
 
 const markVideoReadyIfAllJobsDone = async (videoId: string) => {
-    const outstanding = await prisma.mediaProcessingJob.count({
-        where: { videoId, status: { in: ["QUEUED", "RUNNING"] } },
-    });
-    const anyFailed = await prisma.mediaProcessingJob.count({
-        where: { videoId, status: "FAILED" },
-    });
-    if (outstanding > 0) return; // still waiting for the other job to finish, or one already failed
+  const outstanding = await prisma.mediaProcessingJob.count({
+    where: { videoId, status: { in: ['QUEUED', 'RUNNING'] } },
+  });
+  const anyFailed = await prisma.mediaProcessingJob.count({
+    where: { videoId, status: 'FAILED' },
+  });
+  if (outstanding > 0) return; // still waiting for the other job to finish, or one already failed
 
-    await prisma.video.update({
-        where: { id: videoId },
-        data: {
-            status: anyFailed > 0 ? "FAILED" : "READY",
-            publishedAt: anyFailed > 0 ? null : new Date(),
-        },
-    });
+  const updated = await prisma.video.update({
+    where: { id: videoId },
+    data: {
+      status: anyFailed > 0 ? 'FAILED' : 'READY',
+      publishedAt: anyFailed > 0 ? null : new Date(),
+    },
+  });
+
+  // Only fan out "new video" notifications on a genuine success, and only
+  // for videos meant to be publicly discovered — no point pinging
+    // followers about an UNLISTED/PRIVATE upload.
+    if (anyFailed === 0 && updated.visibility === "PUBLIC") {
+        await NotificationService.notifyFollowersOfNewVideo(
+            updated.creatorId,
+            updated.id,
+            updated.title,
+        );
+    }
 };
 
 /**

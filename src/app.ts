@@ -16,15 +16,24 @@ import { notFoundHandler } from './middleware/notFound';
 import { errorHandler } from './middleware/errorHandler';
 import { apiRateLimiter, strictRateLimiter } from './middleware/ratelimit';
 import { profileRouter } from './routes/profile';
+import { creatorRouter } from './routes/creator';
 import { videosRouter } from './routes/video';
+import { playbackRouter } from './routes/playback';
+import { socialRouter } from './routes/social';
+import { feedRouter } from './routes/feed';
+import { notificationsRouter } from './routes/notification';
+import { categoryRouter } from './routes/category';
 
 export const app = express();
 
+// Security middleware to set various HTTP headers for security best practices
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }),
+);
 
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-}));
-
+// Enable CORS for all routes. In production, you might want to restrict this to specific origins.
 app.use(cors());
 app.use(requestLogger);
 
@@ -38,10 +47,17 @@ app.get('/health', (req: Request, res: Response) => {
   // res.send("Hello World! from server side");
 });
 
+// Register routers for different API endpoints
 app.use('/api', meRouter);
 app.use('/api', profileRouter);
+app.use('/api', creatorRouter);
 app.use('/api', videosRouter);
+app.use('/api', playbackRouter);
+app.use('/api', socialRouter);
+app.use('/api', feedRouter);
+app.use('/api', notificationsRouter);
+app.use('/api', categoryRouter);
 
-
+// Error handling middleware should be the last middleware added to the app
 app.use(notFoundHandler);
 app.use(errorHandler);

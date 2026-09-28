@@ -8,13 +8,18 @@ export const ProfileService = {
     getByUserName: async (username: string) => {
         try {
             const profile = await prisma.profile.findUnique({
-                where: { username },
-                include: {
-                    user: {
-                        select: { role: true, accountStatus: true, createdAt: true }
-                    },
-                    avatarAsset: true,
+              where: { username },
+              include: {
+                user: {
+                  select: {
+                    role: true,
+                    accountStatus: true,
+                    createdAt: true,
+                    creatorProfile: { select: { id: true } },
+                  },
                 },
+                avatarAsset: true,
+              },
             });
             if (!profile || profile.user.accountStatus !== AccountStatus.ACTIVE) {
                 throw new ApiError(404, `No Profile found for username ${username}. Account is blocked.`);
@@ -68,45 +73,6 @@ export const ProfileService = {
                 throw error;
             }
             throw new ApiError(500, "Failed to generate avatar upload URL", error);
-        }
-    },
-
-    becomeCreator: async (clerkUserId: string, channelName: string) => {
-        try {
-            const user = await prisma.user.findUnique({
-                where: { clerkUserId },
-                include: { creatorProfile: true },
-            });
-            if (!user) {
-                throw new ApiError(404, "User not found");
-            }
-            if (user.creatorProfile) {
-                throw new ApiError(409, "User is already a creator");
-            }
-
-            const existingChannel = await prisma.creatorProfile.findUnique({
-                where: { channelName },
-            });
-            if (existingChannel) {
-                throw new ApiError(409, "Channel name is already taken");
-            }
-
-            const [, creatorProfile] = await prisma.$transaction([
-                prisma.user.update({
-                    where: { id: user.id },
-                    data: { role: "CREATOR" },
-                }),
-                prisma.creatorProfile.create({
-                    data: { userId: user.id, channelName },
-                }),
-            ]);
-
-            return creatorProfile;
-        } catch (error) {
-            if (error instanceof ApiError) {
-                throw error;
-            }
-            throw new ApiError(500, "Failed to create creator profile", error);
         }
     },
 

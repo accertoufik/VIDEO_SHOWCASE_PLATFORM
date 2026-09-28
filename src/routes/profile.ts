@@ -19,7 +19,9 @@ profileRouter.get(
 
 const updateProfileSchema = z.object({
     displayName: z.string().min(1).max(80).optional(),
-    biology: z.string().max(500).optional(),
+    biography: z.string().max(500).optional(),
+}).refine((data) => Object.keys(data).length > 0, {
+    message: "At least one field must be provided",
 });
 
 profileRouter.patch(
@@ -37,27 +39,6 @@ profileRouter.patch(
         const profile = await ProfileService.updateOwnProfile(clerkUserId, parsed.data);
         sendSuccessResponse(res, { profile });
     }),
-);
-
-const creatorProfileSchema = z.object({
-    channelName: z.string().min(3).max(50),
-});
-
-profileRouter.post(
-    "/creator-profile",
-    authenticateUser,
-    asyncHandler(async (req: AuthenticatedRequest, res) => {
-        const clerkUserId = req.auth?.userId;
-        if (!clerkUserId) throw new ApiError(401, "Unauthorized");
-
-        const parsed = creatorProfileSchema.safeParse(req.body);
-        if (!parsed.success) {
-            throw new ApiError(400, "Invalid creator profile request", z.treeifyError(parsed.error).properties);
-        }
-
-        const creatorProfile = await ProfileService.becomeCreator(clerkUserId, parsed.data.channelName);
-        sendSuccessResponse(res, { creatorProfile });
-    })
 );
 
 const avatarUploadSchema = z.object({
