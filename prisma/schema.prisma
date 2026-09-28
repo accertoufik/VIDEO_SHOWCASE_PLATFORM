@@ -247,6 +247,7 @@ model Video {
 
   originalAssetId    String? @unique
   thumbnailAssetId   String? @unique
+  thumbnailIsCustom  Boolean @default(false)
   previewAssetId     String? @unique
   hlsManifestAssetId String? @unique
 

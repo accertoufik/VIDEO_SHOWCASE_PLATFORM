@@ -1,5 +1,6 @@
 import ffmpegPath from "ffmpeg-static";
 import ffmpeg from "fluent-ffmpeg";
+import ffprobeStatic from "ffprobe-static";
 
 /**
  * ffmpeg-static bundles a real FFmpeg executable for your OS/CPU and just
@@ -14,5 +15,15 @@ if(!ffmpegPath) {
 }
 
 ffmpeg.setFfmpegPath(ffmpegPath);
+
+/**
+ * ffprobe is a SEPARATE binary from ffmpeg — same project, different job.
+ * ffmpeg encodes/transcodes; ffprobe just inspects a file and reports back
+ * facts about it (resolution, duration, codec, bitrate...) without
+ * touching the file. We need this to answer "how big was the source
+ * video?" BEFORE deciding which quality rungs to generate — ffmpeg alone
+ * has no "just tell me the resolution" mode.
+ */
+ffmpeg.setFfprobePath(ffprobeStatic.path);
 
 export { ffmpeg };

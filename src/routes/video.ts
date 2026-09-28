@@ -187,6 +187,79 @@ videosRouter.get(
   }),
 );
 
+const thumbnailUploadSchema = z.object({
+  fileExtension: z.string().regex(/^\.\w+$/, 'Invalid file extension'),
+});
+
+/** POST /api/videos/:videoId/thumbnail
+ * Creator-only. Requests a signed upload URL for a custom thumbnail image.
+ */
+
+videosRouter.post(
+  '/videos/:videoId/thumbnail',
+  authenticateUser,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const clerkUserId = req.auth?.userId;
+    if (!clerkUserId) {
+      throw new ApiError(401, 'Unauthorized: No user ID found in request');
+    }
+
+    const videoId = parseVideoId(req.params.videoId);
+    const parsedBody = thumbnailUploadSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+      throw new ApiError(
+        400,
+        'Invalid thumbnail upload request',
+        z.treeifyError(parsedBody.error).properties,
+      );
+    }
+
+    const result = await VideoService.generateThumbnailUploadUrl(
+      clerkUserId,
+      videoId,
+      parsedBody.data.fileExtension,
+    );
+    sendSuccessResponse(res, result);
+  }),
+);
+
+const confirmThumbnailSchema = z.object({
+  blobName: z.string().min(1),
+});
+
+/** POST /api/videos/:videoId/thumbnail/confirm
+ * Creator-only. Confirms the custom thumbnail upload finished and points
+ * the video at it, overwriting the worker-generated one if present.
+ */
+
+videosRouter.post(
+  '/videos/:videoId/thumbnail/confirm',
+  authenticateUser,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const clerkUserId = req.auth?.userId;
+    if (!clerkUserId) {
+      throw new ApiError(401, 'Unauthorized: No user ID found in request');
+    }
+
+    const videoId = parseVideoId(req.params.videoId);
+    const parsedBody = confirmThumbnailSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+      throw new ApiError(
+        400,
+        'Invalid thumbnail confirmation request',
+        z.treeifyError(parsedBody.error).properties,
+      );
+    }
+
+    const result = await VideoService.confirmThumbnailUpload(
+      clerkUserId,
+      videoId,
+      parsedBody.data.blobName,
+    );
+    sendSuccessResponse(res, { video: result });
+  }),
+);
+
 /**
  * POST /api/videos/:videoId/share
  * Bumps the share counter. No auth required — sharing a public video is a

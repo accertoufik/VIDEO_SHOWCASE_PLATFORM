@@ -117,6 +117,15 @@ const processThumbnailJob = async (job: Job) => {
             throw new Error(`Video or original asset not found for job ${job.id}`);
         }
 
+        // A creator may have already uploaded a custom thumbnail (via
+        // /videos/:videoId/thumbnail/confirm) before this job runs — cheap
+        // early-out for the common case, but not race-safe on its own since
+        // the confirm could land between this read and the write below.
+        if (video.thumbnailIsCustom) {
+            await JobService.markSucceeded(job.id);
+            return;
+        }
+
         const thumbnailBlobPath = await MediaProcessingService.generateThumbnail(video.originalAsset.blobPath);
 
         const thumbnailAsset = await prisma.mediaAsset.create({
@@ -129,12 +138,17 @@ const processThumbnailJob = async (job: Job) => {
             },
         });
 
-        await prisma.video.update({
-            where: { id: video.id },
-            data: {
-                thumbnailAssetId: thumbnailAsset.id,
-            },
+        // Atomic guard against the actual race: only write if the video is
+        // still not custom at the moment of the update. If a confirm() call
+        // won the race in between, this matches zero rows and we no-op.
+        const result = await prisma.video.updateMany({
+            where: { id: video.id, thumbnailIsCustom: false },
+            data: { thumbnailAssetId: thumbnailAsset.id },
         });
+
+        if (result.count === 0) {
+            console.log(`Skipped auto-thumbnail for video ${video.id} — creator already set a custom one.`);
+        }
 
         await JobService.markSucceeded(job.id);
     } catch (error) {

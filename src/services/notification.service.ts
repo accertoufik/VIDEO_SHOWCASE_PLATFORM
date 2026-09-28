@@ -74,7 +74,7 @@ export const NotificationService = {
             await prisma.notification.createMany({
                 data: followers.map(f => ({
                     recipientId: f.followerId,
-                    actorId: creatorId,
+                    actorId: creatorProfile.userId,
                     type: 'NEW_VIDEO_FROM_FOLLOWED' as const,
                     title: `${channelName} just posted a new video`,
                     body: title, videoId, creatorId,

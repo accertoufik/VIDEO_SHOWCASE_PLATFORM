@@ -218,6 +218,86 @@ export const VideoService = {
       throw new ApiError(500, 'Failed to generate download URL', error);
     }
   },
+  /**
+   * Custom thumbnail upload — same two-step SAS-URL pattern as avatar/banner:
+   * 1. Client asks for a signed upload URL and uploads the image directly to
+   *    Azure Blob.
+   * 2. Client calls confirmThumbnailUpload() once the upload finishes, which
+   *    verifies the blob landed and points the video at the new MediaAsset.
+   * This overwrites whatever thumbnail the processing worker auto-generated
+   * from the video itself — a creator-supplied thumbnail takes precedence.
+   */
+  generateThumbnailUploadUrl: async (
+    clerkUserId: string,
+    videoId: string,
+    fileExtension: string,
+  ) => {
+    try {
+      const { creatorProfile } = await requireCreatorProfile(clerkUserId);
+      const video = await prisma.video.findUnique({ where: { id: videoId } });
+      if (!video || video.creatorId !== creatorProfile.id) {
+        throw new ApiError(404, 'Video not found');
+      }
+
+      const blobName = `thumbnails/${video.id}/${randomUUID()}.${fileExtension}`;
+      const uploadUrl = await AzureStorageService.generateUploadSasUrl(
+        'thumbnails',
+        blobName,
+      );
+
+      return { uploadUrl, blobName, container: 'thumbnails' as const };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to generate thumbnail upload URL', error);
+    }
+  },
+
+  confirmThumbnailUpload: async (
+    clerkUserId: string,
+    videoId: string,
+    blobName: string,
+  ) => {
+    try {
+      const { creatorProfile } = await requireCreatorProfile(clerkUserId);
+      const video = await prisma.video.findUnique({ where: { id: videoId } });
+      if (!video || video.creatorId !== creatorProfile.id) {
+        throw new ApiError(404, 'Video not found');
+      }
+
+      const exists = await AzureStorageService.blobExists('thumbnails', blobName);
+      if (!exists) {
+        throw new ApiError(
+          400,
+          'Uploaded thumbnail not found in storage — upload may have failed',
+        );
+      }
+
+      const asset = await prisma.mediaAsset.create({
+        data: {
+          type: 'THUMBNAIL',
+          storageProvider: 'AZURE_BLOB',
+          container: 'thumbnails',
+          blobPath: blobName,
+          status: 'READY',
+        },
+      });
+
+      // Replacing an existing thumbnail (worker-generated or a prior custom
+      // upload): the old MediaAsset row is orphaned, same tradeoff the
+      // avatar/banner flows already make.
+      const updated = await prisma.video.update({
+        where: { id: videoId },
+        data: { thumbnailAssetId: asset.id, thumbnailIsCustom: true },
+        include: { thumbnailAsset: true },
+      });
+
+      return updated;
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to confirm thumbnail upload', error);
+    }
+  },
+
   /** bumps the share counter - called once per "sahre" tap in the client */
   incrementShareCount: async (videoId: string) => {
     try {
