@@ -36,4 +36,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 /generated/prisma
 
 API_DOCUMENTATION.md
-VideoOnDemandApp.postman_collection.json
+VideoOnDemand.postman_collection.json
