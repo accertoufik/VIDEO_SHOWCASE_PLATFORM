@@ -15,7 +15,12 @@ const requireCreator = async (clerkUserId: string) => {
   return user.creatorProfile;
 };
 
-const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
+/** Start (00:00 UTC) of the oldest day in a `days`-day window ending today. */
+const windowStart = (days: number) => {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - (days - 1) * 86_400_000);
+};
+// in overview() and videoAnalytics():  const since = windowStart(days);
 
 /** Views per UTC day. A "view" = one watch_history row (one play start by a signed-in viewer). */
 const viewsByDay = async (creatorId: string, since: Date, videoId?: string) => {
@@ -39,7 +44,7 @@ export const StudioService = {
   overview: async (clerkUserId: string, days: number) => {
     try {
       const creator = await requireCreator(clerkUserId);
-      const since = daysAgo(days);
+      const since = windowStart(days);
 
       const [
         totals,
@@ -129,7 +134,7 @@ export const StudioService = {
       if (!video || video.deletedAt) throw new ApiError(404, 'Video not found');
       if (video.creatorId !== creator.id)
         throw new ApiError(403, 'Not your video');
-      const since = daysAgo(days);
+      const since = windowStart(days);
 
       const [viewsInPeriod, uniqueViewers, progress, completedCount, series] =
         await Promise.all([
