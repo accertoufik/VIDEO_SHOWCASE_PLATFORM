@@ -54,7 +54,9 @@ creatorRouter.patch(
 
 // post / update the banner image of a creator profile
 const bannerImageSchema = z.object({
-    fileExtension: z.string().min(1).max(10),
+    fileExtension: z
+    .string()
+    .regex(/^[a-zA-Z0-9]{1,10}$/, 'Invalid file extension (letters/digits only, no dot)'),
 });
 
 creatorRouter.post(

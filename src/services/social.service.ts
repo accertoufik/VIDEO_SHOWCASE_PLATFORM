@@ -2,6 +2,8 @@ import { prisma } from '../config/db';
 import { ApiError } from '../middleware/errorHandler';
 import { NotificationService } from './notification.service';
 import { AzureStorageService } from './azure-storage.service';
+import { softDeleteCommentTree } from './comment-ops';
+import { toPage, visibleToUserWhere } from '../lib/videoWhere';
 
 /**
  * Comments come back with the commenter's raw avatarAsset row (container +
@@ -52,6 +54,16 @@ const attachAvatarUrls = async <
     ...withAvatarUrl(comment),
     replies: (comment.replies ?? []).map(withAvatarUrl),
   }));
+};
+
+const assertInteractable = (
+  video: { deletedAt: Date | null; visibility: string; creator?: { userId: string } | null },
+  userId: string,
+) => {
+  const isOwner = video.creator?.userId === userId;
+  if (video.deletedAt || (video.visibility === 'PRIVATE' && !isOwner)) {
+    throw new ApiError(404, 'Video not found');
+  }
 };
 
 const getUserOrThrow = async (ClerkUserId: string) => {
@@ -138,6 +150,7 @@ export const SocialService = {
         include: { creator: true },
       });
       if (!video) throw new ApiError(404, 'Video not found');
+      assertInteractable(video, user.id);
 
       try {
         await prisma.$transaction([
@@ -224,13 +237,14 @@ export const SocialService = {
         include: { creator: true },
       });
       if (!video) throw new ApiError(404, 'Video not found');
+      assertInteractable(video, user.id);
 
       let parentComment = null;
       if (parentCommentId) {
         parentComment = await prisma.comment.findUnique({
           where: { id: parentCommentId },
         });
-        if (!parentComment || parentComment.videoId !== videoId)
+        if (!parentComment || parentComment.videoId !== videoId || parentComment.deletedAt)
           throw new ApiError(404, 'Parent comment not found');
       }
       const [comment] = await prisma.$transaction([
@@ -239,7 +253,7 @@ export const SocialService = {
             videoId: videoId,
             userId: user.id,
             body: content,
-            parentCommentId: parentCommentId,
+            parentCommentId: parentComment ? (parentComment.parentCommentId ?? parentComment.id) : null,
           },
         }),
         prisma.video.update({
@@ -284,7 +298,7 @@ export const SocialService = {
         });
       }
 
-      return comment;
+      return commentWithAvatarUrl;
     } catch (error) {
       if (error instanceof ApiError) {
         throw error;
@@ -294,8 +308,18 @@ export const SocialService = {
   },
 
   //list comments for a video
-  listComments: async (videoId: string) => {
+  listComments: async (videoId: string, viewerClerkUserId?: string) => {
     try {
+      const video = await prisma.video.findUnique({
+        where: { id: videoId },
+        include: { creator: { select: { userId: true } } },
+      });
+      if (!video) throw new ApiError(404, 'Video not found');
+      const viewer = viewerClerkUserId
+        ? await prisma.user.findUnique({ where: { clerkUserId: viewerClerkUserId }, select: { id: true } })
+        : null;
+      assertInteractable(video, viewer?.id ?? '');
+
       const commentUserInclude = {
         user: { include: { profile: { include: { avatarAsset: true } } } },
       };
@@ -331,16 +355,7 @@ export const SocialService = {
       if (comment.userId !== user.id)
         throw new ApiError(403, 'You can only delete your own comments');
 
-      await prisma.$transaction([
-        prisma.comment.update({
-          where: { id: commentId },
-          data: { deletedAt: new Date() },
-        }),
-        prisma.video.update({
-          where: { id: comment.videoId },
-          data: { commentCount: { decrement: 1 } },
-        }),
-      ]);
+      await softDeleteCommentTree(comment);
       return { deleted: true };
     } catch (error) {
       if (error instanceof ApiError) {
@@ -356,8 +371,10 @@ export const SocialService = {
       const user = await getUserOrThrow(ClerkUserId);
       const video = await prisma.video.findUnique({
         where: { id: videoId },
+        include: { creator: true },
       });
       if (!video) throw new ApiError(404, 'Video not found');
+      assertInteractable(video, user.id);
 
       try {
         await prisma.savedVideo.create({
@@ -400,36 +417,40 @@ export const SocialService = {
     }
   },
 
-  //get the user's watchlist
-  getWatchlist: async (ClerkUserId: string) => {
+  //get the user's watchlist (paginated)
+  getWatchlist: async (ClerkUserId: string, limit = 50, cursor?: string) => {
     try {
       const user = await getUserOrThrow(ClerkUserId);
-      return await prisma.savedVideo.findMany({
-        where: { userId: user.id },
-        include: { video: true },
-        orderBy: { createdAt: 'desc' },
+      const rows = await prisma.savedVideo.findMany({
+        where: { userId: user.id, video: visibleToUserWhere(user.id) },
+        include: { video: { include: { thumbnailAsset: true, creator: { include: { user: { select: { id: true, role: true } } } } } } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       });
+      const { items, nextCursor } = toPage(rows, limit);
+      return { saved: items, nextCursor };
     } catch (error) {
-      if (error instanceof ApiError) {
-        throw error;
-      }
+      if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to get watchlist', error);
     }
   },
 
-  /** Mirrors listSavedVideos — every video the caller has liked, newest like first. */
-  listLikedVideos: async (ClerkUserId: string) => {
+  /** Every video the caller has liked, newest like first (paginated). */
+  listLikedVideos: async (ClerkUserId: string, limit = 50, cursor?: string) => {
     try {
       const user = await getUserOrThrow(ClerkUserId);
-      return await prisma.videoLike.findMany({
-        where: { userId: user.id },
-        include: { video: { include: { thumbnailAsset: true, creator: { include: { user: true } } } } },
-        orderBy: { createdAt: 'desc' },
+      const rows = await prisma.videoLike.findMany({
+        where: { userId: user.id, video: visibleToUserWhere(user.id) },
+        include: { video: { include: { thumbnailAsset: true, creator: { include: { user: { select: { id: true, role: true } } } } } } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       });
-    }catch (error) {
-      if (error instanceof ApiError) {
-        throw error;
-      }
+      const { items, nextCursor } = toPage(rows, limit);
+      return { liked: items, nextCursor };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to get liked videos', error);
     }
   },

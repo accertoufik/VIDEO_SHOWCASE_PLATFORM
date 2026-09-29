@@ -1,6 +1,7 @@
 import { prisma } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
 import { Router } from "express";
+import { z } from "zod";
 import { sendSuccessResponse } from "../lib/apiResponse";
 import { asyncHandler } from "../lib/asyncHandler";
 import { type AuthenticatedRequest, authenticateUser } from "../middleware/auth";
@@ -25,7 +26,8 @@ notificationsRouter.get(
         }
 
         const limit = Math.min(Number(req.query.limit) || 20, 50);
-        const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : null;
+        const cursorParsed = z.uuid().safeParse(req.query.cursor);
+        const cursor = cursorParsed.success ? cursorParsed.data : null;
         const result = await NotificationService.listMine(userId, limit, cursor);
         sendSuccessResponse(res, result);
     })

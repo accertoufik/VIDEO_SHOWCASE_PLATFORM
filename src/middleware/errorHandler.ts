@@ -15,8 +15,12 @@ export class ApiError extends Error {
 export const errorHandler = (err: ApiError, req: Request, res: Response, next: NextFunction) => {
   console.error(err);
   const statusCode = err.statusCode || 500;
-  const message = err.message || "Internal Server Error";
-  const details = err.details;
+  const message =
+    statusCode >= 500 && !(err instanceof ApiError)
+      ? 'Internal Server Error'
+      : err.message || 'Internal Server Error';
+  // Never echo raw internals (Prisma/Azure errors, stack info) for server errors.
+  const details = statusCode >= 500 ? undefined : err.details;
 
   sendErrorResponse(res, statusCode, message, details);
 };

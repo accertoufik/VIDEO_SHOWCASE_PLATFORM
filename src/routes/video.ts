@@ -11,6 +11,8 @@ import {
 import { ApiError } from '../middleware/errorHandler';
 import { VideoService } from '../services/video.service';
 import { env } from '../config/env';
+import { FeedService } from '../services/feed.service';
+import { ViewerService } from '../services/viewer.service';
 
 export const videosRouter = Router();
 
@@ -25,13 +27,23 @@ const parseVideoId = (rawVideoId: unknown): string => {
 const initVideoSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(5000).optional(),
-  type: z.enum(['LONG_FORM', 'SHORT_FORM']),
+  // Optional hint only — the server classifies short vs long from the real
+  // file (duration + aspect ratio) and overwrites this after processing.
+  type: z.enum(['LONG_FORM', 'SHORT_FORM']).optional(),
   visibility: z.enum(['PUBLIC', 'UNLISTED', 'PRIVATE']).optional(),
   categoryId: z.uuid({
     message: 'Category is required - see GET/api/categories',
   }),
-  fileExtension: z.string().min(1).max(10),
-  mimeType: z.string().min(1),
+  fileExtension: z
+    .string()
+    .regex(/^[a-zA-Z0-9]{1,10}$/, 'Invalid file extension (letters/digits only, no dot)'),
+  mimeType: z.string().min(1).optional(),
+  // YouTube-style upload choice: "AUTO" (default) grabs a frame from the
+  // video; "CUSTOM" signals the creator intends to upload their own via
+  // POST /videos/:videoId/thumbnail right after this. Either way, the
+  // auto-generated one still happens as a fallback — see the schema
+  // comment on Video.thumbnailSource.
+  thumbnailSource: z.enum(['AUTO', 'CUSTOM']).optional(),
 });
 
 /** POST  /api/videos/init
@@ -125,19 +137,61 @@ videosRouter.get(
     }
     const videoId = parseVideoId(req.params.videoId);
     const video = await VideoService.getById(videoId, viewerClerkUserId);
-    sendSuccessResponse(res, { video });
+    // `viewer` = the caller's own button state; null when anonymous.
+    const viewer = await ViewerService.getVideoState(viewerClerkUserId, video);
+    // Don't expose internal identifiers/storage paths to other viewers.
+    const isOwner = video.creator.user.clerkUserId === viewerClerkUserId;
+    const { originalAsset: _originalAsset, ...rest } = video;
+    const publicVideo = {
+      ...rest,
+      ...(isOwner ? { originalAsset: _originalAsset } : {}),
+      creator: {
+        ...video.creator,
+        user: { id: video.creator.user.id, role: video.creator.user.role },
+      },
+    };
+    sendSuccessResponse(res, { video: publicVideo, viewer });
   }),
 );
 
 const updateVideoSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   description: z.string().max(5000).optional(),
-  visibility: z.enum(['PUBLIC', 'UNLISTED', 'PRIVATE']).optional(),
   categoryId: z.uuid().optional(),
 });
 
+const relatedQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(30).default(12),
+});
+
+/** GET /api/videos/:videoId/related
+ * Returns a list of related videos based on the video's category and tags.
+ */ 
+
+videosRouter.get(
+  '/videos/:videoId/related',
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const videoId = parseVideoId(req.params.videoId);
+    const parsedQuery = relatedQuerySchema.safeParse(req.query);
+    if (!parsedQuery.success) {
+      throw new ApiError(
+        400,
+        'Invalid query parameters',
+        z.treeifyError(parsedQuery.error).properties,
+      );
+    }
+    const { limit } = parsedQuery.data;
+    const relatedVideos = await FeedService.getRelatedVideos(videoId, limit);
+    sendSuccessResponse(res, { relatedVideos });
+  }));
+
 /** PATCH /api/videos/:videoId
  * Updates the metadata of a video. Only the creator of the video can update it.
+ * Visibility is deliberately NOT settable here — it only ever changes via
+ * POST /videos/:videoId/publish, which enforces the video is actually
+ * READY before anything can go live and fires the "new video" notification
+ * fan-out. Allowing visibility here would let a creator skip that gate
+ * entirely.
  */
 
 videosRouter.patch(
@@ -165,6 +219,47 @@ videosRouter.patch(
       parsedBody.data,
     );
     sendSuccessResponse(res, { video: updatedVideo });
+  }),
+);
+
+const publishVideoSchema = z.object({
+  visibility: z.enum(['PUBLIC', 'UNLISTED', 'PRIVATE']),
+});
+
+/**
+ * POST /api/videos/:videoId/publish
+ * Owning creator only. The video must already be READY (480p/720p done).
+ * All three visibilities — including PUBLIC — are allowed as soon as it's
+ * READY; HD (1080p/1440p) is NOT required. If HD finishes later, it's
+ * added to the manifest in place and the creator just gets a notification
+ * — no second publish call needed. See VideoService.publish.
+ */
+
+videosRouter.post(
+  '/videos/:videoId/publish',
+  authenticateUser,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const clerkUserId = req.auth?.userId;
+    if (!clerkUserId) {
+      throw new ApiError(401, 'Unauthorized: No user ID found in request');
+    }
+
+    const videoId = parseVideoId(req.params.videoId);
+    const parsedBody = publishVideoSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+      throw new ApiError(
+        400,
+        'Invalid publish request',
+        z.treeifyError(parsedBody.error).properties,
+      );
+    }
+
+    const video = await VideoService.publish(
+      clerkUserId,
+      videoId,
+      parsedBody.data.visibility,
+    );
+    sendSuccessResponse(res, { video });
   }),
 );
 
@@ -272,5 +367,21 @@ videosRouter.post(
     const videoId = parseVideoId(req.params.videoId);
     await VideoService.incrementShareCount(videoId);
     sendSuccessResponse(res, { message: 'Share count bumped' });
+  }),
+);
+
+//delete video owner only soft delete
+videosRouter.delete(
+  '/videos/:videoId',
+  authenticateUser,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const clerkUserId = req.auth?.userId;
+    if (!clerkUserId) {
+      throw new ApiError(401, 'Unauthorized: No user ID found in request');
+    }
+
+    const videoId = parseVideoId(req.params.videoId);
+    await VideoService.deleteVideo(clerkUserId, videoId);
+    sendSuccessResponse(res, { message: 'Video deleted successfully' });
   }),
 );

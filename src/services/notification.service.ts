@@ -1,6 +1,7 @@
 import type { Prisma } from './../../generated/prisma/client';
 import { prisma } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
+import { PushService } from './push.service';
 
 /* Every notification-creating call below is deliberately "fire and forget"
  * from the caller's point of view — a failed notification write should
@@ -43,6 +44,16 @@ export const NotificationService = {
                     payload: input.payload as Prisma.InputJsonValue | undefined,
                 },
             });
+            void PushService.sendToUsers([input.recipientId], {
+                title: input.title,
+                body: input.body,
+                data: {
+                    type: input.type,
+                    videoId: input.videoId,
+                    creatorId: input.creatorId,
+                    ...input.payload,
+                },
+            });
         } catch (error) {
             console.error('Failed to create notification:', error);
         }
@@ -80,6 +91,15 @@ export const NotificationService = {
                     body: title, videoId, creatorId,
                 })),
                 skipDuplicates: true,
+            });
+            void PushService.sendToUsers(followers.map(f => f.followerId), {
+                title: `${channelName} just posted a new video`,
+                body: title,
+                data: {
+                    type: 'NEW_VIDEO_FROM_FOLLOWED',
+                    videoId,
+                    creatorId,
+                },
             });
         } catch (error) {
             console.error('Failed to notify followers of new video:', error);

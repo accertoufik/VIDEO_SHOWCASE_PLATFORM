@@ -73,6 +73,140 @@ export const AzureStorageService = {
     }
   },
   
+  /**
+   * Reads a small text blob back out of storage — used to fetch an
+   * already-published master.m3u8 so an HD transcode job can amend it
+   * (append its rung) instead of overwriting the whole file.
+   */
+  downloadText: async (containerName: ContainerName, blobName: string): Promise<string> => {
+    try {
+      const blockBlobClient = AzureStorageService.getBlockBlobClient(
+        containerName,
+        blobName,
+      );
+      const buffer = await blockBlobClient.downloadToBuffer();
+      return buffer.toString('utf-8');
+    } catch (error) {
+      throw new Error(
+        `Failed to download text "${blobName}" from "${containerName}": ${error}`,
+      );
+    }
+  },
+
+  /**
+   * Same as downloadText, but also returns the blob's current ETag — a
+   * version fingerprint Azure updates on every write. Pairs with
+   * uploadTextIfMatch() below to do a safe read-modify-write: the 1080p
+   * and 1440p transcode jobs both amend the SAME master.m3u8, and can now
+   * genuinely run at the same instant (see WORKER_CONCURRENCY), so a
+   * plain read-then-write here has the exact same lost-update race we
+   * already fixed once in Postgres — this is that same fix, applied to
+   * blob storage instead of a database row.
+   */
+  downloadTextWithEtag: async (
+    containerName: ContainerName,
+    blobName: string,
+  ): Promise<{ content: string; etag: string }> => {
+    try {
+      const blockBlobClient = AzureStorageService.getBlockBlobClient(
+        containerName,
+        blobName,
+      );
+      const buffer = await blockBlobClient.downloadToBuffer();
+      const properties = await blockBlobClient.getProperties();
+      if (!properties.etag) {
+        throw new Error('Blob has no ETag — cannot do a conditional update');
+      }
+      return { content: buffer.toString('utf-8'), etag: properties.etag };
+    } catch (error: any) {
+      if (error?.statusCode === 404) {
+        const notFound = new Error(
+          `Blob "${blobName}" does not exist yet in "${containerName}"`,
+        );
+        notFound.name = 'BlobNotFoundError';
+        throw notFound;
+      }
+      throw new Error(
+        `Failed to download text+ETag for "${blobName}" from "${containerName}": ${error}`,
+      );
+    }
+  },
+
+  /**
+   * Creates a blob ONLY IF it doesn't already exist — Azure's `ifNoneMatch:
+   * "*"` conditional. This is the counterpart to uploadTextIfMatch(): where
+   * that one guards "amend an existing file safely", this one guards
+   * "create a file for the first time safely" when two writers (e.g. the
+   * TRANSCODE_STANDARD job and an HD rung's job, now genuinely concurrent
+   * — see WORKER_CONCURRENCY) might both try to be the one who creates
+   * master.m3u8. Whoever loses gets a distinguishable AlreadyExistsError
+   * and should fall back to the read-then-amend path instead.
+   */
+  uploadTextIfNotExists: async (
+    containerName: ContainerName,
+    blobName: string,
+    content: string,
+  ) => {
+    try {
+      const blockBlobClient = AzureStorageService.getBlockBlobClient(
+        containerName,
+        blobName,
+      );
+      await blockBlobClient.upload(content, Buffer.byteLength(content), {
+        conditions: { ifNoneMatch: '*' },
+      });
+    } catch (error: any) {
+      if (error?.statusCode === 409 || error?.statusCode === 412) {
+        const exists = new Error(
+          `Blob "${blobName}" in "${containerName}" was created by another writer first`,
+        );
+        exists.name = 'AlreadyExistsError';
+        throw exists;
+      }
+      throw new Error(
+        `Failed to create "${blobName}" in "${containerName}": ${error}`,
+      );
+    }
+  },
+
+  /**
+   * Uploads ONLY IF the blob's ETag still matches what the caller read —
+   * this is Azure's optimistic-concurrency guard, the blob-storage
+   * equivalent of Postgres's "UPDATE ... WHERE version = X". If someone
+   * else (the other HD rung's job) wrote to this blob in between our read
+   * and our write, the ETag has changed, Azure rejects this upload with
+   * HTTP 412 (Precondition Failed), and we throw a distinguishable
+   * ConditionNotMetError the caller can catch and retry against a fresh
+   * read — never silently overwriting the other writer's line.
+   */
+  uploadTextIfMatch: async (
+    containerName: ContainerName,
+    blobName: string,
+    content: string,
+    etag: string,
+  ) => {
+    try {
+      const blockBlobClient = AzureStorageService.getBlockBlobClient(
+        containerName,
+        blobName,
+      );
+      await blockBlobClient.upload(content, Buffer.byteLength(content), {
+        conditions: { ifMatch: etag },
+      });
+    } catch (error: any) {
+      if (error?.statusCode === 412) {
+        const conflict = new Error(
+          `ETag mismatch writing "${blobName}" in "${containerName}" — blob changed concurrently`,
+        );
+        conflict.name = 'ConditionNotMetError';
+        throw conflict;
+      }
+      throw new Error(
+        `Failed to conditionally upload "${blobName}" to "${containerName}": ${error}`,
+      );
+    }
+  },
+
   // delete a blob from a specific container
   deleteBlob: async (containerName: ContainerName, blobName: string) => {
     try {

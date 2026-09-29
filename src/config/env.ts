@@ -18,6 +18,8 @@ const appEnvSchema = dbEnvSchema.extend({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
     .default('development'),
+  // Optional: only needed if you enable "enhanced push security" in your Expo account.
+  EXPO_ACCESS_TOKEN: z.string().optional(),
 });
 
 const parse = <T extends z.ZodTypeAny>(schema: T): z.infer<T> => {

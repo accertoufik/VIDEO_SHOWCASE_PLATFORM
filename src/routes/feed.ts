@@ -13,6 +13,7 @@ import { FeedService } from '../services/feed.service';
 export const feedRouter = Router();
 
 const feedQuerySchema = z.object({
+  q: z.string().trim().min(1).max(200),
   limit: z
     .string()
     .optional()
@@ -20,8 +21,10 @@ const feedQuerySchema = z.object({
     .refine((val) => val === undefined || (Number.isInteger(val) && val > 0), {
       message: 'limit must be a positive integer',
     }),
-  cursor: z.string().optional(),
+  cursor: z.uuid().optional(),
   categoryId: z.uuid().optional(),
+  scope: z.enum(["videos", "creators", "categories", "all"]).default("videos"),
+  type: z.enum(["LONG_FORM", "SHORT_FORM"]).optional(),
 });
 
 
@@ -55,18 +58,51 @@ feedRouter.get(
 feedRouter.get(
   '/search',
   asyncHandler(async (req, res) => {
-    const query = req.query.q;
+    const parsed = feedQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw new ApiError(
+        400,
+        'Invalid search query',
+        z.treeifyError(parsed.error),
+      );
+    }
+    const { q, cursor, scope, type } = parsed.data;
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
 
-    if (typeof query !== 'string' || query.trim() === '') {
-      throw new ApiError(400, 'Query parameter "q" is required and must be a non-empty string');
-    }
-    if (isNaN(limit) || limit <= 0) {
-      throw new ApiError(400, 'Query parameter "limit" must be a positive integer');
-    }
+    // if (typeof query !== 'string' || query.trim() === '') {
+    //   throw new ApiError(400, 'Query parameter "q" is required and must be a non-empty string');
+    // }
+    // if (isNaN(limit) || limit <= 0) {
+    //   throw new ApiError(400, 'Query parameter "limit" must be a positive integer');
+    // }
 
-    const videos = await FeedService.searchVideos(query, limit);
-    sendSuccessResponse(res, { videos }, 200);
+    // const videos = await FeedService.searchVideos(query, limit);
+    sendSuccessResponse(res, await FeedService.search(q, limit, { cursor, scope, type }), 200);
+  }),
+);
+
+const creatorVideosQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor: z.string().uuid().optional(),
+  type: z.enum(['LONG_FORM', 'SHORT_FORM']).optional(),
+});
+
+feedRouter.get(
+  '/creators/:creatorId/videos',
+  asyncHandler(async (req, res) => {
+    const parsed = creatorVideosQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw new ApiError(
+        400,
+        'Invalid query parameters',
+        z.treeifyError(parsed.error),
+      );
+    }
+    const { limit, cursor, type } = parsed.data;
+    const creatorId = z.uuid().safeParse(req.params.creatorId);
+    if (!creatorId.success) throw new ApiError(400, 'Invalid creator ID');
+    const result = await FeedService.getCreatorVideos(creatorId.data, limit, cursor, type);
+    sendSuccessResponse(res, result, 200);
   }),
 );
 

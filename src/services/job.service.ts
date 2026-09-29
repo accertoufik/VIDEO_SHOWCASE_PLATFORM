@@ -14,12 +14,22 @@ import { prisma } from "../config/db";
  */
 
 export const JobService = {
+  /**
+   * Only TRANSCODE_STANDARD + THUMBNAIL are enqueued here. TRANSCODE_1080P
+   * / TRANSCODE_1440P are deliberately NOT created yet — nobody has probed
+   * the source's resolution at this point, so we don't yet know which (if
+   * any) HD rungs it actually qualifies for. Creating both HD job rows
+   * upfront and hoping to "skip" the wrong one later has a real race: with
+   * WORKER_CONCURRENCY claiming several jobs per tick, an HD job can be
+   * claimed and start running in the SAME tick as TRANSCODE_STANDARD,
+   * before STANDARD has had a chance to determine resolution — so the
+   * skip never gets a chance to fire, and the HD job re-downloads the
+   * source and runs ffprobe just to discover it doesn't qualify. See
+   * enqueueHdJobsIfNeeded() below, called by the worker only AFTER
+   * TRANSCODE_STANDARD already knows the answer.
+   */
   enqueueProcessingJobs: async (videoId: string) => {
     try {
-      // Calling /complete twice on the same video (retries, double-clicks,
-      // repeated Postman tests) shouldn't spawn a second set of jobs —
-      // only enqueue a job type if one isn't already queued, running, or
-      // already done for this video.
       const existing = await prisma.mediaProcessingJob.findMany({
         where: {
           videoId,
@@ -29,7 +39,7 @@ export const JobService = {
       });
       const existingTypes = new Set(existing.map((job) => job.type));
 
-      const jobsToCreate = (['TRANSCODE', 'THUMBNAIL'] as const)
+      const jobsToCreate = (['TRANSCODE_STANDARD', 'THUMBNAIL'] as const)
         .filter((type) => !existingTypes.has(type))
         .map((type) => ({
           videoId,
@@ -45,6 +55,50 @@ export const JobService = {
     } catch (error) {
       throw new Error(
         `Failed to enqueue processing jobs for videoId ${videoId}: ${error}`,
+      );
+    }
+  },
+
+  /**
+   * Called by the worker's TRANSCODE_STANDARD handler, once it actually
+   * knows which HD rungs (if any) the source qualifies for. Only creates
+   * job rows for labels that qualify — a 1080p source gets exactly one
+   * TRANSCODE_1080P row and no TRANSCODE_1440P row at all, so there's
+   * nothing left for a 1440p job to wastefully claim and bail on.
+   */
+  enqueueHdJobsIfNeeded: async (videoId: string, hdRungsNeeded: string[]) => {
+    try {
+      const typeByLabel = { '1080p': 'TRANSCODE_1080P', '1440p': 'TRANSCODE_1440P' } as const;
+      const typesToCreate = hdRungsNeeded
+        .filter((label): label is '1080p' | '1440p' => label === '1080p' || label === '1440p')
+        .map((label) => typeByLabel[label]);
+
+      if (typesToCreate.length === 0) return;
+
+      const existing = await prisma.mediaProcessingJob.findMany({
+        where: {
+          videoId,
+          type: { in: typesToCreate },
+          status: { in: ['QUEUED', 'RUNNING', 'SUCCEEDED'] },
+        },
+        select: { type: true },
+      });
+      const existingTypes = new Set(existing.map((job) => job.type));
+
+      const jobsToCreate = typesToCreate
+        .filter((type) => !existingTypes.has(type))
+        .map((type) => ({
+          videoId,
+          type,
+          idempotencyKey: `${videoId}-${type}-${randomUUID()}`,
+        }));
+
+      if (jobsToCreate.length === 0) return;
+
+      await prisma.mediaProcessingJob.createMany({ data: jobsToCreate });
+    } catch (error) {
+      throw new Error(
+        `Failed to enqueue HD jobs for videoId ${videoId}: ${error}`,
       );
     }
   },

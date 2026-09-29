@@ -3,17 +3,26 @@ import { z } from 'zod';
 import { sendSuccessResponse } from '../lib/apiResponse';
 import { asyncHandler } from '../lib/asyncHandler';
 import { ProfileService } from '../services/profile.service';
-import { authenticateUser, type AuthenticatedRequest } from '../middleware/auth';
+import { optionalAuth, authenticateUser, type AuthenticatedRequest } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
+import { ViewerService } from '../services/viewer.service';
 
 export const profileRouter = Router();
 
 profileRouter.get(
-  '/users/:username',
-  asyncHandler(async (req, res) => {
-    const username = z.string().parse(req.params.username);
-    const profile = await ProfileService.getByUserName(username);
-    sendSuccessResponse(res, { profile });
+    '/users/:username',
+    optionalAuth,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+      const username = z.string().min(1).max(64).safeParse(req.params.username);
+      if (!username.success) throw new ApiError(400, 'Invalid username');
+      const profile = await ProfileService.getByUserName(username.data);
+      const creatorId = profile.user.creatorProfile?.id;
+      const channel = creatorId ? await ViewerService.getCreatorState(req.auth?.userId, creatorId) : null;
+    sendSuccessResponse(res, {
+      profile,
+      followerCount: channel?.followerCount ?? 0,
+      viewer: channel?.viewer ?? null,
+    });
   }),
 );
 

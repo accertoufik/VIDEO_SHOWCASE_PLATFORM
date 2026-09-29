@@ -111,15 +111,23 @@ export const CreatorService = {
         throw new ApiError(400, "Uploaded file not found in storage — upload may have failed");
       }
 
-      const asset = await prisma.mediaAsset.create({
-        data: {
-          type: "BANNER",
-          storageProvider: "AZURE_BLOB",
-          container: "thumbnails",
-          blobPath: blobName,
-          status: "READY",
-        },
-      });
+      let asset;
+      try {
+        asset = await prisma.mediaAsset.create({
+          data: {
+            type: "BANNER",
+            storageProvider: "AZURE_BLOB",
+            container: "thumbnails",
+            blobPath: blobName,
+            status: "READY",
+          },
+        });
+      } catch (error: any) {
+        if (error.code === 'P2002') {
+          throw new ApiError(409, "This banner upload has already been confirmed");
+        }
+        throw error;
+      }
         // Replacing an existing banner: the old MediaAsset row is orphaned
       // (bannerAssetId just gets reassigned) — deliberately left as-is for
         // now, matching the same tradeoff the avatar flow already makes.

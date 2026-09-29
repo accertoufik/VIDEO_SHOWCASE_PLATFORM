@@ -3,6 +3,7 @@ import { prisma } from '../config/db';
 import { ApiError } from '../middleware/errorHandler';
 import { AzureStorageService } from './azure-storage.service';
 import { JobService } from './job.service';
+import { NotificationService } from './notification.service';
 
 const requireCreatorProfile = async (clerkUserId: string) => {
   const user = await prisma.user.findUnique({
@@ -20,16 +21,35 @@ const requireCreatorProfile = async (clerkUserId: string) => {
 interface InitUploadInput {
   title: string;
   description?: string;
-  type: 'LONG_FORM' | 'SHORT_FORM';
+  // Optional and NOT trusted: the worker overwrites it from the real file
+  // after ffprobe (see classifyVideoFormat). Still accepted so existing
+  // frontends/Postman requests that send it don't break.
+  type?: 'LONG_FORM' | 'SHORT_FORM';
   visibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
-  categoryId?: string;
+  categoryId: string;
   fileExtension: string;
+  // The YouTube-style upload-time choice: "AUTO" (default — we'll grab a
+  // frame from the video) or "CUSTOM" (creator intends to upload their
+  // own). Purely a stated intent for the frontend to act on — see the
+  // thumbnailSource comment on the Video model for what it does and
+  // doesn't change about backend behavior.
+  thumbnailSource?: 'AUTO' | 'CUSTOM';
 }
 
 export const VideoService = {
   initUpload: async (clerkUserId: string, input: InitUploadInput) => {
     try {
       const { creatorProfile } = await requireCreatorProfile(clerkUserId);
+
+      const category = await prisma.category.findUnique({
+        where: { id: input.categoryId },
+      });
+      if (!category) {
+        throw new ApiError(
+          400,
+          'Invalid categoryId — see GET /api/categories for valid options',
+        );
+      }
 
       const blobPath = `${creatorProfile.id}/${randomUUID()}.${input.fileExtension}`;
 
@@ -46,10 +66,20 @@ export const VideoService = {
       const video = await prisma.video.create({
         data: {
           creatorId: creatorProfile.id,
-          type: input.type,
+          // Provisional placeholder only — the worker sets the real value
+          // from the actual file (duration + aspect ratio) before READY.
+          type: input.type ?? 'LONG_FORM',
           title: input.title,
           description: input.description,
-          visibility: input.visibility ?? 'PUBLIC',
+          // Nothing is actually public until the creator explicitly calls
+          // publish() below — this stays PRIVATE no matter what the
+          // request asked for, all the way through UPLOADING/PROCESSING
+          // and even through READY (480p/720p watchable). What they asked
+          // for is only remembered on requestedVisibility, to pre-fill
+          // the publish dialog once it's their call to make.
+          visibility: 'PRIVATE',
+          requestedVisibility: input.visibility ?? 'PUBLIC',
+          thumbnailSource: input.thumbnailSource ?? 'AUTO',
           status: 'UPLOADING',
           categoryId: input.categoryId,
           originalAssetId: asset.id,
@@ -126,6 +156,8 @@ export const VideoService = {
           creator: { include: { user: true } },
           originalAsset: true,
           thumbnailAsset: true,
+          hlsManifestAsset: true,
+          variants: true,
         },
       });
 
@@ -161,10 +193,10 @@ export const VideoService = {
   updateMetadata: async (
     clerkUserId: string,
     videoId: string,
+    // visibility is deliberately excluded — it only changes via publish().
     updates: Partial<{
       title: string;
       description: string;
-      visibility: 'PUBLIC' | 'PRIVATE' | 'UNLISTED';
       categoryId: string;
     }>,
   ) => {
@@ -182,6 +214,64 @@ export const VideoService = {
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to update video metadata', error);
+    }
+  },
+
+  /**
+   * The explicit "go live" action — separate from upload/processing on
+   * purpose. A video sits PRIVATE from the moment it's created through
+   * READY (480p/720p watchable); it only actually becomes visible to
+   * anyone else once the owning creator calls this.
+   *
+   * DESIGN DECISION (matches real YouTube behavior): PUBLIC is allowed as
+   * soon as the video is READY (480p/720p done) — it does NOT wait for
+   * hdReady. Publishing early just means early viewers get a 480p/720p
+   * ceiling; once the HD job finishes later, MediaProcessingService
+   * .transcodeHdRung() has already amended the live master.m3u8 in place,
+   * so the higher rung(s) are simply there for any player that (re)reads
+   * the manifest afterward — no second publish call needed. The creator
+   * gets ONE "HD is ready" notification when the first/minimum HD rung
+   * (1080p) finishes (see the worker's processTranscode1080pJob) — if the
+   * source also qualifies for 1440p, that's added later completely
+   * silently, with no second notification (see processTranscode1440pJob).
+   */
+  publish: async (
+    clerkUserId: string,
+    videoId: string,
+    visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE',
+  ) => {
+    try {
+      const { creatorProfile } = await requireCreatorProfile(clerkUserId);
+
+      const video = await prisma.video.findUnique({ where: { id: videoId } });
+      if (!video || video.deletedAt) throw new ApiError(404, 'Video not found');
+      if (video.creatorId !== creatorProfile.id)
+        throw new ApiError(403, 'Not your video');
+
+      if (video.status !== 'READY' && video.status !== 'PUBLISHED') {
+        throw new ApiError(
+          400,
+          `Video isn't watchable yet (status: ${video.status}) — wait for processing to finish`,
+        );
+      }
+
+      const updated = await prisma.video.update({
+        where: { id: videoId },
+        data: { visibility, status: 'PUBLISHED', publishedAt: new Date() },
+      });
+
+      if (visibility === 'PUBLIC') {
+        await NotificationService.notifyFollowersOfNewVideo(
+          updated.creatorId,
+          updated.id,
+          updated.title,
+        );
+      }
+
+      return updated;
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to publish video', error);
     }
   },
 
@@ -264,7 +354,10 @@ export const VideoService = {
         throw new ApiError(404, 'Video not found');
       }
 
-      const exists = await AzureStorageService.blobExists('thumbnails', blobName);
+      const exists = await AzureStorageService.blobExists(
+        'thumbnails',
+        blobName,
+      );
       if (!exists) {
         throw new ApiError(
           400,
@@ -272,15 +365,26 @@ export const VideoService = {
         );
       }
 
-      const asset = await prisma.mediaAsset.create({
-        data: {
-          type: 'THUMBNAIL',
-          storageProvider: 'AZURE_BLOB',
-          container: 'thumbnails',
-          blobPath: blobName,
-          status: 'READY',
-        },
-      });
+      let asset;
+      try {
+        asset = await prisma.mediaAsset.create({
+          data: {
+            type: 'THUMBNAIL',
+            storageProvider: 'AZURE_BLOB',
+            container: 'thumbnails',
+            blobPath: blobName,
+            status: 'READY',
+          },
+        });
+      } catch (error: any) {
+        if (error.code === 'P2002') {
+          throw new ApiError(
+            409,
+            'This thumbnail upload has already been confirmed',
+          );
+        }
+        throw error;
+      }
 
       // Replacing an existing thumbnail (worker-generated or a prior custom
       // upload): the old MediaAsset row is orphaned, same tradeoff the
@@ -295,6 +399,40 @@ export const VideoService = {
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to confirm thumbnail upload', error);
+    }
+  },
+
+  /**
+   * Owner-only SOFT delete. Every read path already filters deletedAt, so this
+   * removes the video from feed, shorts, search, trending, related, channel
+   * pages, saved/liked/history and playback. Queued encode jobs are cancelled;
+   * a job already RUNNING is ignored by the worker's deleted-video guard.
+   * Azure blobs are NOT purged (kept recoverable; a cleanup job can reclaim later).
+   */
+
+  deleteVideo: async(clerkUserId: string, videoId: string) => {
+    try {
+      const { creatorProfile } = await requireCreatorProfile(clerkUserId);
+      const video = await prisma.video.findUnique({ where: { id: videoId } });
+      if (!video || video.creatorId !== creatorProfile.id) {
+        throw new ApiError(404, 'Video not found');
+      }
+
+      await prisma.$transaction([
+        prisma.video.update({
+          where: { id: videoId },
+          data: { deletedAt: new Date(), status: 'DELETED', visibility: 'PRIVATE' },
+        }),
+        prisma.mediaProcessingJob.updateMany({
+          where: { videoId, status: { in: ['QUEUED', 'RETRYING'] } },
+          data: { status: 'FAILED', completedAt: new Date(), errorMessage: 'Video deleted by owner' },
+        }),
+      ]);
+
+      return {deleted: true, videoId};
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to delete video', error);
     }
   },
 

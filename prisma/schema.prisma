@@ -91,7 +91,14 @@ enum VideoVariantStatus {
 }
 
 enum MediaJobType {
-  TRANSCODE
+  TRANSCODE_STANDARD
+  // Split into two independent jobs (rather than one "TRANSCODE_HD" job
+  // encoding both) so 1080p — the faster, more universally useful rung —
+  // can finish, get recorded, and notify the creator WITHOUT waiting on
+  // the slower 1440p rung. See video-processor.worker.ts for exactly how
+  // each is handled once it completes.
+  TRANSCODE_1080P
+  TRANSCODE_1440P
   THUMBNAIL
   PREVIEW
 }
@@ -102,6 +109,11 @@ enum MediaJobStatus {
   SUCCEEDED
   FAILED
   RETRYING
+}
+
+enum ThumbnailSource {
+  AUTO // worker generates one from a video frame — always happens as a fallback
+  CUSTOM // creator declared upfront they'll upload their own (YouTube-style choice)
 }
 
 enum NotificationType {
@@ -138,6 +150,7 @@ model User {
   watchLater         WatchLater[]
   watchHistory       WatchHistory[]
   watchProgress      WatchProgress[]
+  deviceTokens       DeviceToken[]
   notifications      Notification[]  @relation("NotificationRecipient")
   actorNotifications Notification[]  @relation("NotificationActor")
 
@@ -153,7 +166,6 @@ model Profile {
   biography     String?
   createdAt     DateTime @default(now()) @db.Timestamptz(6)
   updatedAt     DateTime @updatedAt @db.Timestamptz(6)
-
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   avatarAsset MediaAsset? @relation(fields: [avatarAssetId], references: [id], onDelete: SetNull)
 
@@ -245,9 +257,58 @@ model Video {
   status      VideoStatus @default(DRAFT)
   durationMs  BigInt?
 
+  // Display-oriented pixel size (rotation already applied). Lets the frontend
+  // reserve the right player box (vertical vs horizontal) before playback,
+  // and lets us re-classify later if the thresholds ever change.
+
+  width  Int?
+  height Int?
+
+  // What the creator asked for at upload time. NOT what's actually live —
+  // `visibility` above stays PRIVATE until the creator explicitly calls
+  // VideoService.publish(). This is just remembered so the frontend can
+  // pre-fill the publish dialog with what they originally intended.
+  requestedVisibility Visibility?
+
+  // True once the FIRST/minimum HD rung (1080p) has finished — OR
+  // immediately, if the source never qualified for one at all (e.g. a
+  // 720p upload, where the standard rungs already ARE its native
+  // quality). This is what drives the ONE "HD is ready" notification —
+  // see the worker's processTranscode1080pJob. It does NOT track 1440p:
+  // if a source also qualifies for 1440p, that rung is added later,
+  // silently, with no second notification and no separate flag — its
+  // presence is just a VideoVariant row the next GET /videos/:id (or
+  // manifest reload) will naturally include. hdReady is informational
+  // only now — PUBLIC no longer waits on it, see VideoService.publish().
+  hdReady Boolean @default(false)
+
+  // Stamped the instant STANDARD (480p+720p) + THUMBNAIL both finish.
+  // Starts the grace-window clock the notification dispatcher uses to
+  // decide whether to wait for HD or send the SD-only notice now — see
+  // deliverReadyNotifications() in the worker.
+  standardReadyAt DateTime? @db.Timestamptz(6)
+
+  // Guards against sending the "video is ready" notification twice.
+  readyNotificationSent Boolean @default(false)
+
+  // Guards the separate follow-up "HD is ready" notification (only fires
+  // on the slow path, when HD missed the grace window).
+  hdNotificationSent Boolean @default(false)
+
   originalAssetId    String? @unique
   thumbnailAssetId   String? @unique
   thumbnailIsCustom  Boolean @default(false)
+  // What the creator picked at upload time — AUTO ("generate one for me
+  // from the video") or CUSTOM ("I'll upload my own"), the same two-option
+  // choice YouTube shows on upload. This is purely a UX/intent signal for
+  // the frontend (e.g. skip prompting for a custom upload when AUTO was
+  // picked, or show the upload widget immediately when CUSTOM was picked).
+  // It does NOT change backend behavior: the auto-thumbnail job always
+  // still runs as a safety net (see the worker), so a video always ends
+  // up with SOME thumbnail even if a creator who picked CUSTOM never
+  // actually uploads one — thumbnailIsCustom is still what decides which
+  // one wins if both exist.
+  thumbnailSource ThumbnailSource @default(AUTO)
   previewAssetId     String? @unique
   hlsManifestAssetId String? @unique
 
@@ -284,8 +345,10 @@ model Video {
   notifications  Notification[]
 
   @@index([creatorId, status])
-  @@index([type, visibility, status])
-  @@index([publishedAt])
+  // Serves the home feed and the shorts feed: both filter on these three and
+  // sort by publishedAt DESC, so one composite index covers them.
+  @@index([type, visibility, status, publishedAt(sort: Desc)])
+  @@index([publishedAt(sort: Desc)])
   @@index([scheduledAt])
   @@map("videos")
 }
@@ -530,4 +593,24 @@ model Notification {
 
   @@index([recipientId, readAt])
   @@map("notifications")
+}
+
+// =====================================================================
+// 9. PUSH NOTIFICATIONS (device registration)
+// =====================================================================
+// token is globally unique: if a phone signs into another account, the row is
+// re-pointed at the new user instead of leaving two accounts on one device.
+model DeviceToken {
+  id         String   @id @default(uuid())
+  userId     String
+  token      String   @unique
+  provider   String   @default("EXPO")
+  platform   String
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  lastSeenAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("device_tokens")
 }

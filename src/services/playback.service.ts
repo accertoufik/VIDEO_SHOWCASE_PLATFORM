@@ -53,6 +53,8 @@ export const PlaybackService = {
 
     /** Called once when a viewer starts playing — logs the view, bumps the counter. */
     recordWatchStart: async (videoId: string, ClerkUserId: string) => {
+        // 404s for deleted / not-visible videos, so views can't be inflated on private ones.
+        await VideoService.getById(videoId, ClerkUserId);
         const user = await prisma.user.findUnique({ where: { clerkUserId: ClerkUserId } });
         if (!user) throw new ApiError(404, "User not found");
         
@@ -74,7 +76,7 @@ export const PlaybackService = {
     saveProgress: async (videoId: string, ClerkUserId: string, input: { positionMs: number; completionPercent?: number, completed?: boolean }) => {
         const user = await prisma.user.findUnique({ where: { clerkUserId: ClerkUserId } });
         if (!user) throw new ApiError(404, "User not found");
-
+        await VideoService.getById(videoId, ClerkUserId);
 
         return await prisma.watchProgress.upsert({
             where: { userId_videoId: { userId: user.id, videoId: videoId } },

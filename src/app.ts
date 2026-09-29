@@ -21,8 +21,12 @@ import { videosRouter } from './routes/video';
 import { playbackRouter } from './routes/playback';
 import { socialRouter } from './routes/social';
 import { feedRouter } from './routes/feed';
+import { shortsRouter } from './routes/shorts';
 import { notificationsRouter } from './routes/notification';
 import { categoryRouter } from './routes/category';
+import { devicesRouter } from './routes/devices';
+import { libraryRouter } from './routes/library';
+import { studioRouter } from './routes/studio';
 
 export const app = express();
 
@@ -55,8 +59,12 @@ app.use('/api', videosRouter);
 app.use('/api', playbackRouter);
 app.use('/api', socialRouter);
 app.use('/api', feedRouter);
+app.use('/api', shortsRouter);
 app.use('/api', notificationsRouter);
 app.use('/api', categoryRouter);
+app.use('/api', devicesRouter);
+app.use('/api', libraryRouter);
+app.use('/api', studioRouter);
 
 // Error handling middleware should be the last middleware added to the app
 app.use(notFoundHandler);

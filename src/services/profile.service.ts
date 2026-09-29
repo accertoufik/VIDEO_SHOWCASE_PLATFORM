@@ -90,15 +90,23 @@ export const ProfileService = {
                 throw new ApiError(400, "Uploaded avatar file does not exist in storage-upload may have failed or been deleted");
             }
 
-            const asset = await prisma.mediaAsset.create({
-                data: {
-                    type: "AVATAR",
-                    storageProvider: "AZURE_BLOB",
-                    container: "thumbnails",
-                    blobPath: blobName,
-                    status: "READY",
-                },
-            });
+            let asset;
+            try {
+                asset = await prisma.mediaAsset.create({
+                    data: {
+                        type: "AVATAR",
+                        storageProvider: "AZURE_BLOB",
+                        container: "thumbnails",
+                        blobPath: blobName,
+                        status: "READY",
+                    },
+                });
+            } catch (error: any) {
+                if (error.code === 'P2002') {
+                    throw new ApiError(409, "This avatar upload has already been confirmed");
+                }
+                throw error;
+            }
            const profile = await prisma.profile.update({
                 where: { userId: user.id },
                 data: { avatarAssetId: asset.id },

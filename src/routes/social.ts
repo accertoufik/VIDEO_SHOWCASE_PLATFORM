@@ -5,9 +5,16 @@ import { ApiError } from '../middleware/errorHandler';
 import { SocialService } from '../services/social.service';
 import {
   authenticateUser,
+  optionalAuth,
   type AuthenticatedRequest,
 } from '../middleware/auth';
 import { sendSuccessResponse } from '../lib/apiResponse';
+
+const pageQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor: z.uuid().optional(),
+});
+
 
 export const socialRouter = Router();
 
@@ -118,12 +125,13 @@ socialRouter.post(
 //list comments for a video
 socialRouter.get(
   '/videos/:videoId/comments',
+  optionalAuth,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const videoId = req.params.videoId;
     if (typeof videoId !== 'string') {
       throw new ApiError(400, 'Invalid video ID');
     }
-    const comments = await SocialService.listComments(videoId);
+    const comments = await SocialService.listComments(videoId, req.auth?.userId);
     sendSuccessResponse(res, comments, 200);
   }),
 );
@@ -182,8 +190,12 @@ socialRouter.get(
   authenticateUser,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const clerkUserId = requireAuthUserId(req);
-    const savedVideos = await SocialService.getWatchlist(clerkUserId);
-    sendSuccessResponse(res, { savedVideos }, 200);
+    const page = pageQuery.safeParse(req.query);
+    if (!page.success) {
+      throw new ApiError(400, 'Invalid query parameters', z.treeifyError(page.error));
+    }
+    const { limit, cursor } = page.data;
+    sendSuccessResponse(res, await SocialService.getWatchlist(clerkUserId, limit, cursor), 200);
   }),
 );
 
@@ -193,7 +205,11 @@ socialRouter.get(
   authenticateUser,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const clerkUserId = requireAuthUserId(req);
-    const likedVideos = await SocialService.listLikedVideos(clerkUserId);
-    sendSuccessResponse(res, { likedVideos }, 200);
+    const page = pageQuery.safeParse(req.query);
+    if (!page.success) {
+      throw new ApiError(400, 'Invalid query parameters', z.treeifyError(page.error));
+    }
+    const { limit, cursor } = page.data;
+    sendSuccessResponse(res, await SocialService.listLikedVideos(clerkUserId, limit, cursor), 200);
   }),
 );
