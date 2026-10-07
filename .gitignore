@@ -1,0 +1,57 @@
+# dependencies (bun install)
+node_modules
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store
+
+/generated/prisma
+
+API_DOCUMENTATION.md
+VideoOnDemand.postman_collection.json
+
+# generated Prisma client (rebuilt by `bun run db:generate`); the old rule only matched at the repo root
+backend/generated/
+
+# project documentation kept locally
+backend/docs/
+docs/
+
+# AI assistant tooling and editor settings
+.agents/
+.claude/
+.windsurf/
+.vscode/
+skills-lock.json
+AGENTS.md
+
+# one package manager per project: bun (bun.lock) is the one in use
+package-lock.json
