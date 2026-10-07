@@ -350,6 +350,8 @@ model Video {
   @@index([type, visibility, status, publishedAt(sort: Desc)])
   @@index([publishedAt(sort: Desc)])
   @@index([scheduledAt])
+  // Creator channel page / Studio lists: one creator's videos by status, newest first.
+  @@index([creatorId, status, publishedAt(sort: Desc)])
   @@map("videos")
 }
 
@@ -444,6 +446,8 @@ model VideoLike {
 
   @@unique([userId, videoId])
   @@index([videoId])
+  // Liked-videos library: newest first per user.
+  @@index([userId, createdAt(sort: Desc)])
   @@map("video_likes")
 }
 
@@ -493,7 +497,7 @@ model SavedVideo {
   video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
   @@unique([userId, videoId])
-  @@index([userId])
+  @@index([userId, createdAt(sort: Desc)])
   @@map("saved_videos")
 }
 
@@ -565,7 +569,8 @@ model MediaProcessingJob {
   video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
   @@index([videoId, type])
-  @@index([status])
+  // The worker's queue poll: QUEUED jobs, oldest first.
+  @@index([status, queuedAt])
   @@map("media_processing_jobs")
 }
 
@@ -592,6 +597,8 @@ model Notification {
   creator   CreatorProfile? @relation(fields: [creatorId], references: [id], onDelete: SetNull)
 
   @@index([recipientId, readAt])
+  // Notification list is ordered newest-first per recipient.
+  @@index([recipientId, createdAt(sort: Desc)])
   @@map("notifications")
 }
 

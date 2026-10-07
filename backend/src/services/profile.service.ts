@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "../config/db";
 import { AzureStorageService } from "./azure-storage.service";
+import { assertImageBlob } from "../lib/assertImageBlob";
 import { ApiError } from "../middleware/errorHandler";
 import { AccountStatus } from "../../generated/prisma/enums";
 
@@ -15,7 +16,15 @@ export const ProfileService = {
                     role: true,
                     accountStatus: true,
                     createdAt: true,
-                    creatorProfile: { select: { id: true } },
+                    creatorProfile: {
+                      select: {
+                        id: true,
+                        channelName: true,
+                        aboutText: true,
+                        verificationStatus: true,
+                        bannerAsset: { select: { blobPath: true } },
+                      },
+                    },
                   },
                 },
                 avatarAsset: true,
@@ -34,7 +43,7 @@ export const ProfileService = {
         }
     },
 
-    updateOwnProfile: async (clerkUserId: string, updates: { displayName?: string; biography?: string; }) => {
+    updateOwnProfile: async (clerkUserId: string, updates: { displayName?: string; username?: string; biography?: string; }) => {
         try {
             const user = await prisma.user.findUnique({
                 where: { clerkUserId },
@@ -43,11 +52,28 @@ export const ProfileService = {
             if(! user || !user.profile) {
                 throw new ApiError(404, "user not found or profile not found for the user");
             }
-            const profile = await prisma.profile.update({
-                where: { userId: user.id },
-                data: updates,
-            });
-            return profile;
+            // The username is permanent: a creator's channel is named after it. It can only be SET once, while it is still
+            // the placeholder created at sign-up (the Clerk id); after that it never changes.
+            if (updates.username !== undefined && updates.username !== user.profile.username) {
+                if (user.profile.username !== clerkUserId) {
+                    throw new ApiError(403, "Usernames can't be changed");
+                }
+                // Usernames are unique regardless of capitals ("Jane" and "jane" are the same person to everyone).
+                const taken = await prisma.profile.findFirst({
+                    where: { username: { equals: updates.username, mode: 'insensitive' }, NOT: { userId: user.id } },
+                    select: { id: true },
+                });
+                if (taken) throw new ApiError(409, "That username is already taken");
+            }
+            try {
+                return await prisma.profile.update({
+                    where: { userId: user.id },
+                    data: updates,
+                });
+            } catch (error: any) {
+                if (error?.code === 'P2002') throw new ApiError(409, "That username is already taken");
+                throw error;
+            }
         } catch (error) {
             if(error instanceof ApiError) {
                 throw error;
@@ -65,7 +91,7 @@ export const ProfileService = {
             if(! user || !user.profile) {
                 throw new ApiError(404, "user not found or profile not found for the user");
             }
-            const blobName = `avatars/${user.id}/${randomUUID()}.${fileExtension}`;
+            const blobName = `avatars/${user.id}/${randomUUID()}.${fileExtension.replace(/^\./, '')}`;
             const uploadUrl = await AzureStorageService.generateUploadSasUrl("thumbnails", blobName);
             return { uploadUrl, blobName, container: "thumbnails" as const };
         } catch (error) {
@@ -89,6 +115,8 @@ export const ProfileService = {
             if(!exists) {
                 throw new ApiError(400, "Uploaded avatar file does not exist in storage-upload may have failed or been deleted");
             }
+
+            await assertImageBlob("thumbnails", blobName);
 
             let asset;
             try {

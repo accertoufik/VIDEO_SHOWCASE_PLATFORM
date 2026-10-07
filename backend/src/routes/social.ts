@@ -118,7 +118,7 @@ socialRouter.post(
       parsed.data.body,
       parsed.data.parentCommentId ?? null,
     );
-    sendSuccessResponse(res, result, 201);
+    sendSuccessResponse(res, { comment: result }, 201);
   }),
 );
 
@@ -132,7 +132,7 @@ socialRouter.get(
       throw new ApiError(400, 'Invalid video ID');
     }
     const comments = await SocialService.listComments(videoId, req.auth?.userId);
-    sendSuccessResponse(res, comments, 200);
+    sendSuccessResponse(res, { comments }, 200);
   }),
 );
 

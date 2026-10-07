@@ -1,3 +1,4 @@
+import { assertImageBlob } from '../lib/assertImageBlob';
 import { prisma } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
 import { randomUUID } from "node:crypto";
@@ -17,11 +18,16 @@ const requireOwnCreatorProfile = async (clerkUserId: string) => {
 };
 
 export const CreatorService = {
-  becomeCreator: async (clerkUserId: string, channelName: string) => {
+  /**
+   * A viewer becomes a creator. The channel name is optional: when it isn't given, the channel is named after the
+   * account's username (already unique, already chosen), and the about text starts as the profile bio. That way
+   * nobody has to type the same details twice. An explicit channelName is still honoured.
+   */
+  becomeCreator: async (clerkUserId: string, channelName?: string, aboutText?: string) => {
     try {
       const user = await prisma.user.findUnique({
         where: { clerkUserId },
-        include: { creatorProfile: true },
+        include: { creatorProfile: true, profile: true },
       });
       if (!user) {
         throw new ApiError(404, 'User not found');
@@ -30,12 +36,28 @@ export const CreatorService = {
         throw new ApiError(409, 'User is already a creator');
       }
 
-      const existingChannel = await prisma.creatorProfile.findUnique({
-        where: { channelName },
-      });
-      if (existingChannel) {
-        throw new ApiError(409, 'Channel name is already taken');
+      let name = channelName?.trim();
+      if (name) {
+        const existingChannel = await prisma.creatorProfile.findUnique({
+          where: { channelName: name },
+        });
+        if (existingChannel) {
+          throw new ApiError(409, 'Channel name is already taken');
+        }
+      } else {
+        // Derived from the profile, so the profile must be real first (not the sign-up placeholder).
+        if (!user.profile || user.profile.username === clerkUserId) {
+          throw new ApiError(400, 'Finish setting up your profile before becoming a creator');
+        }
+        const base = user.profile.username;
+        name = base;
+        for (let n = 2; await prisma.creatorProfile.findUnique({ where: { channelName: name } }); n++) {
+          if (n > 50) throw new ApiError(409, 'Could not pick a channel name. Please try again.');
+          name = `${base}_${n}`.slice(0, 50);
+        }
       }
+      const channel = name;
+      const about = aboutText?.trim() || user.profile?.biography?.trim() || undefined;
 
       const [, creatorProfile] = await prisma.$transaction([
         prisma.user.update({
@@ -43,7 +65,7 @@ export const CreatorService = {
           data: { role: 'CREATOR' },
         }),
         prisma.creatorProfile.create({
-          data: { userId: user.id, channelName },
+          data: { userId: user.id, channelName: channel, ...(about ? { aboutText: about } : {}) },
         }),
       ]);
 
@@ -51,6 +73,10 @@ export const CreatorService = {
     } catch (error) {
       if (error instanceof ApiError) {
         throw error;
+      }
+      // channelName is unique: if two requests race past the check above, still answer clearly instead of a 500.
+      if ((error as { code?: string } | null)?.code === 'P2002') {
+        throw new ApiError(409, 'Channel name is already taken');
       }
       throw new ApiError(500, 'Failed to create creator profile', error);
     }
@@ -110,6 +136,8 @@ export const CreatorService = {
       if (!exists) {
         throw new ApiError(400, "Uploaded file not found in storage — upload may have failed");
       }
+
+      await assertImageBlob('thumbnails', blobName);
 
       let asset;
       try {

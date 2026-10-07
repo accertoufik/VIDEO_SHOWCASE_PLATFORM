@@ -3,7 +3,8 @@ import { ApiError } from '../middleware/errorHandler';
 import { NotificationService } from './notification.service';
 import { AzureStorageService } from './azure-storage.service';
 import { softDeleteCommentTree } from './comment-ops';
-import { toPage, visibleToUserWhere } from '../lib/videoWhere';
+import { toPage, visibleToUserWhere, VIDEO_CARD_INCLUDE } from '../lib/videoWhere';
+import { presentVideoCards } from '../lib/videoCard';
 
 /**
  * Comments come back with the commenter's raw avatarAsset row (container +
@@ -56,6 +57,33 @@ const attachAvatarUrls = async <
   }));
 };
 
+type CommentRow = {
+  id: string;
+  videoId: string;
+  userId: string;
+  parentCommentId: string | null;
+  body: string;
+  createdAt: Date;
+  user: { avatarUrl?: string | null; profile: { username: string; displayName: string } | null };
+  replies?: CommentRow[];
+};
+
+/** Public shape of a comment: just the author's display fields and whether the caller wrote it. No user row. */
+const presentComment = (c: CommentRow, viewerUserId?: string): Record<string, unknown> => ({
+  id: c.id,
+  videoId: c.videoId,
+  parentCommentId: c.parentCommentId,
+  body: c.body,
+  createdAt: c.createdAt,
+  isMine: viewerUserId != null && c.userId === viewerUserId,
+  author: {
+    username: c.user.profile?.username ?? null,
+    displayName: c.user.profile?.displayName ?? 'User',
+    avatarUrl: c.user.avatarUrl ?? null,
+  },
+  replies: (c.replies ?? []).map((reply) => presentComment(reply, viewerUserId)),
+});
+
 const assertInteractable = (
   video: { deletedAt: Date | null; visibility: string; creator?: { userId: string } | null },
   userId: string,
@@ -101,7 +129,8 @@ export const SocialService = {
         throw error;
       }
 
-      await NotificationService.create({
+      // Fire-and-forget: the follow is already saved, and the notification must not make the app wait for it.
+      void NotificationService.create({
         recipientId: CreatorProfile.userId,
         actorId: user.id,
         type: 'NEW_FOLLOWER',
@@ -298,7 +327,7 @@ export const SocialService = {
         });
       }
 
-      return commentWithAvatarUrl;
+      return presentComment(commentWithAvatarUrl as unknown as CommentRow, user.id);
     } catch (error) {
       if (error instanceof ApiError) {
         throw error;
@@ -330,11 +359,15 @@ export const SocialService = {
           replies: {
             where: { deletedAt: null },
             include: commentUserInclude,
+            orderBy: { createdAt: 'asc' }, // replies read oldest-first, like a conversation
           },
         },
         orderBy: { createdAt: 'desc' },
       });
-      return await attachAvatarUrls(comments);
+      const withAvatars = await attachAvatarUrls(comments);
+      return (withAvatars as unknown as CommentRow[]).map((comment) =>
+        presentComment(comment, viewer?.id),
+      );
     } catch (error) {
       if (error instanceof ApiError) {
         throw error;
@@ -423,13 +456,17 @@ export const SocialService = {
       const user = await getUserOrThrow(ClerkUserId);
       const rows = await prisma.savedVideo.findMany({
         where: { userId: user.id, video: visibleToUserWhere(user.id) },
-        include: { video: { include: { thumbnailAsset: true, creator: { include: { user: { select: { id: true, role: true } } } } } } },
+        include: { video: { include: VIDEO_CARD_INCLUDE } },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit + 1,
         ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       });
       const { items, nextCursor } = toPage(rows, limit);
-      return { saved: items, nextCursor };
+      const videos = await presentVideoCards(items.map((row) => row.video));
+      return {
+        saved: items.map((row, i) => ({ id: row.id, createdAt: row.createdAt, video: videos[i] })),
+        nextCursor,
+      };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to get watchlist', error);
@@ -442,13 +479,17 @@ export const SocialService = {
       const user = await getUserOrThrow(ClerkUserId);
       const rows = await prisma.videoLike.findMany({
         where: { userId: user.id, video: visibleToUserWhere(user.id) },
-        include: { video: { include: { thumbnailAsset: true, creator: { include: { user: { select: { id: true, role: true } } } } } } },
+        include: { video: { include: VIDEO_CARD_INCLUDE } },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit + 1,
         ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       });
       const { items, nextCursor } = toPage(rows, limit);
-      return { liked: items, nextCursor };
+      const videos = await presentVideoCards(items.map((row) => row.video));
+      return {
+        liked: items.map((row, i) => ({ id: row.id, createdAt: row.createdAt, video: videos[i] })),
+        nextCursor,
+      };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to get liked videos', error);

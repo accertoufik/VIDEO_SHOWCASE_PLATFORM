@@ -14,6 +14,8 @@ import { classifyVideoFormat } from '../lib/videoClassification';
  * trying to use the API at the same time.
  */
 
+// A RUNNING job older than this is assumed orphaned by a crashed worker and is re-queued (bounded retries).
+const STALE_JOB_MS = Number(process.env.STALE_JOB_MINUTES ?? 90) * 60 * 1000;
 const POLL_INTERVAL_MS = 5000; // how often to check for new work when idle
 
 // How many jobs a single tick will claim and run AT THE SAME TIME (via
@@ -512,6 +514,9 @@ const dispatch = async (job: Job) => {
  */
 const tick = async () => {
     try {
+        const stale = await JobService.requeueStaleJobs(STALE_JOB_MS);
+        if (stale.requeued || stale.failed) console.warn(`[worker] stale jobs: ${stale.requeued} re-queued, ${stale.failed} failed`);
+
         const claimed: Job[] = [];
         for (let i = 0; i < WORKER_CONCURRENCY; i++) {
             const job = (await JobService.claimNextQueuedJob()) as Job | null;

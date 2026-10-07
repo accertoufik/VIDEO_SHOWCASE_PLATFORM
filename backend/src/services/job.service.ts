@@ -119,11 +119,29 @@ export const JobService = {
    * processing.
    */
 
+  /**
+   * A worker that crashes (or is redeployed) mid-encode leaves its job RUNNING forever, and nothing else
+   * would ever pick it up. Called from the worker's tick: jobs RUNNING longer than `olderThanMs` go back
+   * to QUEUED, up to MAX_RETRIES times; after that they are marked FAILED so a bad file can't loop forever.
+   */
+  requeueStaleJobs: async (olderThanMs: number, maxRetries = 2) => {
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const requeued = await prisma.mediaProcessingJob.updateMany({
+      where: { status: 'RUNNING', startedAt: { lt: cutoff }, retryCount: { lt: maxRetries } },
+      data: { status: 'QUEUED', startedAt: null, retryCount: { increment: 1 } },
+    });
+    const failed = await prisma.mediaProcessingJob.updateMany({
+      where: { status: 'RUNNING', startedAt: { lt: cutoff }, retryCount: { gte: maxRetries } },
+      data: { status: 'FAILED', completedAt: new Date(), errorMessage: 'Timed out (worker stopped?)' },
+    });
+    return { requeued: requeued.count, failed: failed.count };
+  },
+
   claimNextQueuedJob: async () => {
     try {
       const job = await prisma.mediaProcessingJob.findFirst({
         where: { status: 'QUEUED' },
-        orderBy: { startedAt: 'asc' }, //oldest job first fifo
+        orderBy: { queuedAt: 'asc' }, // oldest job first (FIFO). startedAt is NULL while queued, so it can't order the queue
       });
       if (!job) {
         return null;

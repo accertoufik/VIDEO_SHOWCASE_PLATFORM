@@ -77,3 +77,22 @@ notificationsRouter.patch(
 );
 
 
+
+
+/**
+ * DELETE /api/notifications
+ * Clears (deletes) every notification for the caller.
+ */
+notificationsRouter.delete(
+    '/notifications',
+    authenticateUser,
+    asyncHandler(async (req: AuthenticatedRequest, res) => {
+        const userId = req.auth?.userId;
+        if (!userId) {
+            throw new ApiError(401, "Unauthorized: No user ID found in request");
+        }
+
+        const result = await NotificationService.clearAll(userId);
+        sendSuccessResponse(res, result);
+    })
+);

@@ -2,6 +2,7 @@ import type { Prisma } from './../../generated/prisma/client';
 import { prisma } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
 import { PushService } from './push.service';
+import { signImage } from '../lib/signImage';
 
 /* Every notification-creating call below is deliberately "fire and forget"
  * from the caller's point of view — a failed notification write should
@@ -116,11 +117,11 @@ export const NotificationService = {
                 throw new ApiError(404, "User not found");
             }
 
-            const notifications = await prisma.notification.findMany({
+            const rows = await prisma.notification.findMany({
                 where: { recipientId: user.id },
                 include: {
-                    actor: { include: { profile: true } },
-                    video: { select: { id: true, title: true, thumbnailAsset: true } },
+                    actor: { include: { profile: { include: { avatarAsset: true } } } },
+                    video: { select: { id: true, title: true, thumbnailAsset: { select: { blobPath: true } } } },
                 },
                 orderBy: { createdAt: 'desc' },
                 take: limit + 1,
@@ -128,15 +129,41 @@ export const NotificationService = {
                 skip: cursor ? 1 : 0,
             });
 
-            const hasMore = notifications.length > limit;
-            const page = hasMore ? notifications.slice(0, limit) : notifications;
+            const hasMore = rows.length > limit;
+            const page = hasMore ? rows.slice(0, limit) : rows;
             const nextCursor = hasMore ? (page[page.length - 1]?.id ?? null) : null;
 
-            const UnreadCount = await prisma.notification.count({
-                where: { recipientId: user.id, readAt: null }
+            // Explicit pick: no user rows, emails, Clerk ids or blob paths leave the server.
+            const notifications = await Promise.all(
+                page.map(async (n) => {
+                    const profile = n.actor?.profile;
+                    const [avatarUrl, thumbnailUrl] = await Promise.all([
+                        signImage(profile?.avatarAsset?.blobPath),
+                        signImage(n.video?.thumbnailAsset?.blobPath),
+                    ]);
+                    return {
+                        id: n.id,
+                        type: n.type,
+                        title: n.title,
+                        body: n.body,
+                        readAt: n.readAt,
+                        createdAt: n.createdAt,
+                        videoId: n.videoId,
+                        creatorId: n.creatorId,
+                        actor: profile
+                            ? { displayName: profile.displayName, username: profile.username, avatarUrl }
+                            : null,
+                        video: n.video ? { id: n.video.id, title: n.video.title, thumbnailUrl } : null,
+                    };
+                }),
+            );
+
+            const unreadCount = await prisma.notification.count({
+                where: { recipientId: user.id, readAt: null },
             });
 
-            return { notifications: page, nextCursor, UnreadCount };
+            // `UnreadCount` (capital U) is what this endpoint used to send; keep it so existing callers don't break.
+            return { notifications, nextCursor, unreadCount, UnreadCount: unreadCount };
         }catch (error) {
             if (error instanceof ApiError) throw error;
             console.error('Failed to list notifications:', error);
@@ -175,6 +202,25 @@ export const NotificationService = {
             if (error instanceof ApiError) throw error;
             console.error('Failed to mark notification as read:', error);
             throw new ApiError(500, "Failed to mark notification as read");
+        }
+    },
+
+    /** Deletes every notification the caller has received. */
+    clearAll: async (clerkUserId: string) => {
+        try {
+            const user = await prisma.user.findUnique({
+                where: { clerkUserId },
+                select: { id: true }
+            });
+            if (!user) {
+                throw new ApiError(404, "User not found");
+            }
+            const result = await prisma.notification.deleteMany({ where: { recipientId: user.id } });
+            return { deletedCount: result.count };
+        } catch (error) {
+            if (error instanceof ApiError) throw error;
+            console.error('Failed to clear notifications:', error);
+            throw new ApiError(500, "Failed to clear notifications");
         }
     },
 
