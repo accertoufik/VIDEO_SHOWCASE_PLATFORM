@@ -1,10 +1,10 @@
 export const SHORT_MAX_DURATION = 60_000;
 export const SHORT_DURATION_TOLERANCE = 500;
 
-// width / height. 9:16 = 0.5625. Real phones also shoot 720x1280 (0.5625) and
-// 1080x2340 (0.46), so we accept "9:16 or narrower" rather than exact 9:16.
-// 4:5 (0.8), 1:1 (1.0) and every horizontal format are correctly rejected.
-export const SHORT_MAX_ASPECT_RATIO = 0.6;
+// width / height. 9:16 = 0.5625, 4:5 = 0.8, 1:1 = 1.0. Phones shoot 720x1280 (0.5625) and 1080x2340 (0.46);
+// photo-style vertical video is 4:5 (0.8); square video is 1:1. Like YouTube, a clip that is SQUARE OR TALLER counts
+// as a Short (a little slack above 1.0 for rounding, e.g. 1080x1076). Anything wider is a horizontal video: LONG_FORM.
+export const SHORT_MAX_ASPECT_RATIO = 1.01;
 
 export type VideoFormat = 'LONG_FORM' | 'SHORT_FORM';
 
@@ -26,7 +26,7 @@ export const getDisplayDimensions = (
 };
 
 /**
- * SHORT_FORM only when BOTH hold: short enough AND portrait 9:16-or-narrower.
+ * SHORT_FORM only when BOTH hold: short enough (60s) AND square or portrait (1:1 or taller).
  * Unknown/zero values fall back to LONG_FORM — the safe default, since a
  * misfiled Short in the home feed is far less harmful than a long video
  * vanishing into the shorts section.
@@ -50,6 +50,6 @@ export const classifyVideoFormat = (input: {
   }
 
     const isShortEnough = durationMs <= SHORT_MAX_DURATION + SHORT_DURATION_TOLERANCE;
-    const isPortrait = width / height <= SHORT_MAX_ASPECT_RATIO;
-    return isShortEnough && isPortrait ? 'SHORT_FORM' : 'LONG_FORM';
+    const isSquareOrTaller = width / height <= SHORT_MAX_ASPECT_RATIO;
+    return isShortEnough && isSquareOrTaller ? 'SHORT_FORM' : 'LONG_FORM';
 };

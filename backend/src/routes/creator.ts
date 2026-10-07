@@ -9,7 +9,9 @@ import { ApiError } from '../middleware/errorHandler';
 export const creatorRouter = Router();
 
 const creatorProfileSchema = z.object({
-    channelName: z.string().min(3).max(50),
+    // Optional: left out, the channel is named after the account's username.
+    channelName: z.string().trim().min(3).max(50).optional(),
+    aboutText: z.string().max(1500).optional(),
 });
 
 // Create a new creator profile
@@ -25,7 +27,7 @@ creatorRouter.post(
             throw new ApiError(400, "Invalid creator profile request", z.treeifyError(parsed.error).properties);
         }
 
-        const creatorProfile = await CreatorService.becomeCreator(clerkUserId, parsed.data.channelName);
+        const creatorProfile = await CreatorService.becomeCreator(clerkUserId, parsed.data.channelName, parsed.data.aboutText);
         sendSuccessResponse(res, { creatorProfile });
     })
 );
@@ -71,8 +73,9 @@ creatorRouter.post(
             throw new ApiError(400, "Invalid banner image request", z.treeifyError(parsed.error).properties);
         }
 
-        const uploadUrl = await CreatorService.generateBannerUploadUrl(clerkUserId, parsed.data.fileExtension);
-        sendSuccessResponse(res, { uploadUrl });
+        // { uploadUrl, blobName }: the app PUTs the file to uploadUrl, then confirms with blobName.
+        const ticket = await CreatorService.generateBannerUploadUrl(clerkUserId, parsed.data.fileExtension);
+        sendSuccessResponse(res, ticket);
     })
 );
 

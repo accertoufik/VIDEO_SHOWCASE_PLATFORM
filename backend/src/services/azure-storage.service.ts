@@ -73,6 +73,23 @@ export const AzureStorageService = {
     }
   },
   
+  // Same as uploadText, but stores a Content-Type (e.g. text/vtt for subtitle files).
+  uploadTextTyped: async (
+    containerName: ContainerName,
+    blobName: string,
+    content: string,
+    contentType: string,
+  ) => {
+    try {
+      const blockBlobClient = AzureStorageService.getBlockBlobClient(containerName, blobName);
+      await blockBlobClient.upload(content, Buffer.byteLength(content), {
+        blobHTTPHeaders: { blobContentType: contentType },
+      });
+    } catch (error) {
+      throw new Error(`Failed to upload "${blobName}" to "${containerName}": ${error}`);
+    }
+  },
+
   /**
    * Reads a small text blob back out of storage — used to fetch an
    * already-published master.m3u8 so an HD transcode job can amend it
@@ -265,14 +282,19 @@ export const AzureStorageService = {
         containerName,
         blobName,
       );
-      const expiresOn = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+      // Bucket the validity window so repeated requests return the SAME url for a while.
+      // A fresh Date.now() on every call made every url unique, so clients re-downloaded every image.
+      const bucketMs = 15 * 60 * 1000;
+      const bucketStart = Math.floor(Date.now() / bucketMs) * bucketMs;
+      const startsOn = new Date(bucketStart - 5 * 60 * 1000); // small back-dating tolerates clock skew
+      const expiresOn = new Date(bucketStart + bucketMs + expiresInMinutes * 60 * 1000); // >= expiresInMinutes left
 
       const sas = generateBlobSASQueryParameters(
         {
           containerName: containers[containerName].containerName,
           blobName,
           permissions: BlobSASPermissions.parse('r'),
-          startsOn: new Date(),
+          startsOn,
           expiresOn,
         },
         sharedKeyCredential,

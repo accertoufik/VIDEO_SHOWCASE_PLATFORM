@@ -1,4 +1,6 @@
 import { verifyToken } from '@clerk/backend';
+import { cached, CACHE_TTL } from '../cache/cache.service';
+import { cacheKeys } from '../cache/cache.keys';
 import { Router } from 'express';
 import { z } from 'zod';
 import { sendSuccessResponse } from '../lib/apiResponse';
@@ -13,6 +15,8 @@ import { VideoService } from '../services/video.service';
 import { env } from '../config/env';
 import { FeedService } from '../services/feed.service';
 import { ViewerService } from '../services/viewer.service';
+import { prisma } from '../config/db';
+import { presentVideoCards } from '../lib/videoCard';
 
 export const videosRouter = Router();
 
@@ -137,20 +141,43 @@ videosRouter.get(
     }
     const videoId = parseVideoId(req.params.videoId);
     const video = await VideoService.getById(videoId, viewerClerkUserId);
+    // Independent lookups run together: each is a round trip to the (remote) database, and doing them one
+    // after another made opening a video take several seconds.
     // `viewer` = the caller's own button state; null when anonymous.
-    const viewer = await ViewerService.getVideoState(viewerClerkUserId, video);
-    // Don't expose internal identifiers/storage paths to other viewers.
-    const isOwner = video.creator.user.clerkUserId === viewerClerkUserId;
-    const { originalAsset: _originalAsset, ...rest } = video;
-    const publicVideo = {
-      ...rest,
-      ...(isOwner ? { originalAsset: _originalAsset } : {}),
-      creator: {
-        ...video.creator,
-        user: { id: video.creator.user.id, role: video.creator.user.role },
+    // Profile + avatar for the creator row are fetched here (not in getById) because getById runs on every HLS segment request.
+    const [viewer, profile, creatorState] = await Promise.all([
+      ViewerService.getVideoState(viewerClerkUserId, video),
+      prisma.profile.findUnique({
+        where: { userId: video.creator.userId },
+        include: { avatarAsset: true },
+      }),
+      ViewerService.getCreatorState(undefined, video.creatorId),
+    ]);
+    const { followerCount } = creatorState;
+    const [card] = await presentVideoCards([
+      { ...video, creator: { ...video.creator, user: { profile } } },
+    ]);
+    if (!card) throw new ApiError(404, 'Video not found');
+
+    // Never expose storage paths or the raw user row. The app only needs to know "can I stream / download it".
+    // shareCount is private: only the video's owner may see it.
+    const { originalAsset, hlsManifestAsset, variants, shareCount, ...safe } = card;
+    sendSuccessResponse(res, {
+      video: {
+        ...safe,
+        ...(viewer?.isOwner ? { shareCount } : {}),
+        hasStream: hlsManifestAsset != null,
+        canDownload: originalAsset?.status === 'UPLOADED',
+        variants: variants.map((v) => ({
+          label: v.label,
+          width: v.width,
+          height: v.height,
+          status: v.status,
+        })),
+        creatorInfo: card.creatorInfo ? { ...card.creatorInfo, followerCount } : null,
       },
-    };
-    sendSuccessResponse(res, { video: publicVideo, viewer });
+      viewer,
+    });
   }),
 );
 
@@ -181,8 +208,12 @@ videosRouter.get(
       );
     }
     const { limit } = parsedQuery.data;
-    const relatedVideos = await FeedService.getRelatedVideos(videoId, limit);
-    sendSuccessResponse(res, { relatedVideos });
+    // Public, viewer-independent (no auth is passed), so it is shared through the cache.
+    const related = await cached(cacheKeys.related(videoId, limit), CACHE_TTL.related, () =>
+      FeedService.getRelatedVideos(videoId, limit),
+    );
+    // The service returns { videos: [...] }; send the array itself under both names the app accepts.
+    sendSuccessResponse(res, { relatedVideos: related.videos, videos: related.videos });
   }));
 
 /** PATCH /api/videos/:videoId
@@ -278,7 +309,8 @@ videosRouter.get(
       videoId,
       req.auth?.userId,
     );
-    sendSuccessResponse(res, { downloadUrl: result });
+    // result is already { downloadUrl, filename }; wrapping it again made downloadUrl an object, not a string.
+    sendSuccessResponse(res, result);
   }),
 );
 
@@ -366,6 +398,7 @@ videosRouter.post(
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const videoId = parseVideoId(req.params.videoId);
     await VideoService.incrementShareCount(videoId);
+    // The count itself is private to the owner, so it isn't echoed back.
     sendSuccessResponse(res, { message: 'Share count bumped' });
   }),
 );

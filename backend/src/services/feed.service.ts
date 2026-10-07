@@ -2,7 +2,9 @@ import { prisma } from '../config/db';
 import type { Prisma } from '../../generated/prisma/client';
 import { ApiError } from '../middleware/errorHandler';
 //additional import to get creator specific data
-import { mergeUnique, PUBLIC_VIDEO_WHERE, toPage } from '../lib/videoWhere';
+import { mergeUnique, PUBLIC_VIDEO_WHERE, toPage, VIDEO_CARD_INCLUDE } from '../lib/videoWhere';
+import { presentVideoCards } from '../lib/videoCard';
+import { signImage } from '../lib/signImage';
 import { VideoService } from './video.service';
 
 // FIX: a video is live once it's PUBLISHED (what VideoService.publish sets).
@@ -38,7 +40,7 @@ const getPublicFeedPage = async (
       type,
       ...(categoryId ? { categoryId } : {}),
     },
-    include: { thumbnailAsset: true, creator: { include: { user: { select: { id: true, role: true } } } }, category: true },
+    include: VIDEO_CARD_INCLUDE,
     // nulls last — a row with no publishedAt (shouldn't normally happen for
     // a live video, but defensively) never floats above real videos.
     orderBy: [{ publishedAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
@@ -54,7 +56,7 @@ const getPublicFeedPage = async (
   }
   const nextCursor = hasNextPage ? (page[page.length - 1]?.id ?? null) : null;
 
-  return { videos: page, nextCursor };
+  return { videos: await presentVideoCards(page), nextCursor };
 };
 
 export const FeedService = {
@@ -150,16 +152,13 @@ export const FeedService = {
             ...(type ? { type } : {}),
             title: { contains: query, mode: 'insensitive' },
           },
-          include: {
-            thumbnailAsset: true,
-            creator: { include: { user: { select: { id: true, role: true } } } },
-          },
+          include: VIDEO_CARD_INCLUDE,
           orderBy: [{ viewCount: 'desc' }, { id: 'desc' }],
           take: take + 1,
           ...(videoCursor ? { skip: 1, cursor: { id: videoCursor } } : {}),
         });
         const { items, nextCursor } = toPage(rows, take);
-        return { videos: items, nextCursor };
+        return { videos: await presentVideoCards(items), nextCursor };
       };
 
       const searchCreators = async (take: number, creatorCursor?: string) => {
@@ -187,7 +186,7 @@ export const FeedService = {
             ],
           },
           include: {
-            user: { select: { id: true, role: true, profile: true } },
+            user: { select: { id: true, role: true, profile: { include: { avatarAsset: true } } } },
             _count: { select: { followers: true } },
           },
           orderBy: [{ followers: { _count: 'desc' } }, { id: 'desc' }],
@@ -195,16 +194,18 @@ export const FeedService = {
           ...(creatorCursor ? { skip: 1, cursor: { id: creatorCursor } } : {}),
         });
         const { items, nextCursor } = toPage(rows, take);
-        return {
-          creators: items.map((c) => ({
+        // Signed avatar links so the app can show each creator's picture (no storage paths leave the server).
+        const creators = await Promise.all(
+          items.map(async (c) => ({
             creatorId: c.id,
             channelName: c.channelName,
             username: c.user.profile?.username ?? null,
             displayName: c.user.profile?.displayName ?? null,
+            avatarUrl: await signImage(c.user.profile?.avatarAsset?.blobPath),
             followerCount: c._count.followers,
           })),
-          nextCursor,
-        };
+        );
+        return { creators, nextCursor };
       };
 
       const searchCategories = () =>
@@ -250,11 +251,7 @@ export const FeedService = {
         type: source.type,
         id: { not: source.id },
       };
-      const include = {
-        thumbnailAsset: true,
-        creator: { include: { user: { select: { id: true, role: true } } } },
-        category: true,
-      } as const;
+      const include = VIDEO_CARD_INCLUDE;
       const order: Prisma.VideoOrderByWithRelationInput[] = [
         { viewCount: 'desc' },
         { id: 'desc' },
@@ -288,7 +285,9 @@ export const FeedService = {
           : [];
 
       return {
-        videos: mergeUnique([sameCategory, sameCreator, popular], limit),
+        videos: await presentVideoCards(
+          mergeUnique([sameCategory, sameCreator, popular], limit),
+        ),
       };
     } catch (error) {
       if (error instanceof ApiError) throw error;
@@ -313,17 +312,13 @@ export const FeedService = {
 
       const rows = await prisma.video.findMany({
         where: { ...PUBLIC_FEED_WHERE, creatorId, ...(type ? { type } : {}) },
-        include: {
-          thumbnailAsset: true,
-          creator: { include: { user: { select: { id: true, role: true } } } },
-          category: true,
-        },
+        include: VIDEO_CARD_INCLUDE,
         orderBy: FEED_ORDER_BY,
         take: limit + 1,
         ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       });
       const { items, nextCursor } = toPage(rows, limit);
-      return { videos: items, nextCursor };
+      return { videos: await presentVideoCards(items), nextCursor };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to load creator videos', error);
@@ -401,11 +396,7 @@ export const FeedService = {
 
       const videoRows = await prisma.video.findMany({
         where: { id: { in: ranked.map((r) => r.id) } },
-        include: {
-          thumbnailAsset: true,
-          creator: { include: { user: { select: { id: true, role: true } }, profile: true } },
-          category: true,
-        },
+        include: VIDEO_CARD_INCLUDE,
       });
 
       // The raw query above already put ids in ranked order — findMany's
@@ -414,7 +405,7 @@ export const FeedService = {
       const sortedVideos = ranked
         .map((r) => byId.get(r.id))
         .filter((v): v is (typeof videoRows)[number] => !!v);
-      return { videos: sortedVideos };
+      return { videos: await presentVideoCards(sortedVideos) };
     } catch (error) {
       if (error instanceof ApiError) {
         throw error;

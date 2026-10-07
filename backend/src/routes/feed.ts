@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { cached, CACHE_TTL } from '../cache/cache.service';
+import { cacheKeys } from '../cache/cache.keys';
 import { z } from 'zod';
 import { asyncHandler } from '../lib/asyncHandler';
 import { ApiError } from '../middleware/errorHandler';
@@ -132,7 +134,11 @@ feedRouter.get(
         z.treeifyError(parsed.error),
       );
 
-    const result = await FeedService.getTrending(parsed.data);
+    const { type, categoryId, windowDays, limit } = parsed.data;
+    // Trending is public and identical for everyone, so it is safe to share through the cache.
+    const result = await cached(cacheKeys.trending(type, categoryId, windowDays, limit), CACHE_TTL.trending, () =>
+      FeedService.getTrending(parsed.data),
+    );
     sendSuccessResponse(res, result);
   }),
 );

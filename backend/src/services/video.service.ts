@@ -4,6 +4,8 @@ import { ApiError } from '../middleware/errorHandler';
 import { AzureStorageService } from './azure-storage.service';
 import { JobService } from './job.service';
 import { NotificationService } from './notification.service';
+import { VIDEO_CARD_INCLUDE } from '../lib/videoWhere';
+import { presentVideoCards } from '../lib/videoCard';
 
 const requireCreatorProfile = async (clerkUserId: string) => {
   const user = await prisma.user.findUnique({
@@ -180,10 +182,29 @@ export const VideoService = {
     try {
       const { creatorProfile } = await requireCreatorProfile(clerkUserId);
 
-      return await prisma.video.findMany({
+      const rows = await prisma.video.findMany({
         where: { creatorId: creatorProfile.id, deletedAt: null },
         orderBy: { createdAt: 'desc' },
+        include: VIDEO_CARD_INCLUDE,
       });
+      const cards = await presentVideoCards(rows);
+
+      // Explicit pick: no asset rows or blob paths go to the client.
+      return cards.map((c) => ({
+        id: c.id,
+        title: c.title,
+        description: c.description,
+        type: c.type,
+        status: c.status,
+        visibility: c.visibility,
+        requestedVisibility: c.requestedVisibility,
+        categoryId: c.categoryId,
+        durationMs: c.durationMs != null ? Number(c.durationMs) : null,
+        hdReady: c.hdReady,
+        createdAt: c.createdAt,
+        publishedAt: c.publishedAt,
+        thumbnailUrl: c.thumbnailUrl,
+      }));
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to list videos', error);

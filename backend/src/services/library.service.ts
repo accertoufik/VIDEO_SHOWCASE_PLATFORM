@@ -1,6 +1,7 @@
 import { Prisma } from '../../generated/prisma/client';
 import { prisma } from '../config/db';
-import { visibleToUserWhere, toPage, LIVE_STATUSES } from '../lib/videoWhere';
+import { visibleToUserWhere, toPage, LIVE_STATUSES, VIDEO_CARD_INCLUDE } from '../lib/videoWhere';
+import { presentVideoCards } from '../lib/videoCard';
 import { ApiError } from '../middleware/errorHandler';
 import { AzureStorageService } from './azure-storage.service';
 
@@ -12,11 +13,6 @@ const getUserId = async (clerkUserId: string) => {
   if (!user) throw new ApiError(404, 'User not found');
   return user.id;
 };
-
-const VIDEO_CARD_INCLUDE = {
-  thumbnailAsset: true,
-  creator: { include: { user: { select: { id: true, role: true } } } },
-} as const;
 
 const serializeProgress = (p: {
   positionMs: bigint;
@@ -67,10 +63,9 @@ export const LibraryService = {
 
       const videoIds = items.map((r) => r.videoId);
       const [videos, progress] = await Promise.all([
-        prisma.video.findMany({
-          where: { id: { in: videoIds } },
-          include: VIDEO_CARD_INCLUDE,
-        }),
+        prisma.video
+          .findMany({ where: { id: { in: videoIds } }, include: VIDEO_CARD_INCLUDE })
+          .then((rows) => presentVideoCards(rows)),
         prisma.watchProgress.findMany({
           where: { userId, videoId: { in: videoIds } },
         }),
@@ -124,10 +119,11 @@ export const LibraryService = {
         ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       });
       const { items, nextCursor } = toPage(rows, limit);
+      const videos = await presentVideoCards(items.map((p) => p.video));
       return {
-        items: items.map((p) => ({
+        items: items.map((p, i) => ({
           progressId: p.id,
-          video: p.video,
+          video: videos[i],
           progress: serializeProgress(p),
         })),
         nextCursor,

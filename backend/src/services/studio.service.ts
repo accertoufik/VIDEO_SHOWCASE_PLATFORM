@@ -1,5 +1,6 @@
 import { Prisma } from '../../generated/prisma/client';
 import { prisma } from '../config/db';
+import { signImage } from '../lib/signImage';
 import { fillDailySeries, toPage } from '../lib/videoWhere';
 import { ApiError } from '../middleware/errorHandler';
 import { softDeleteCommentTree } from './comment-ops';
@@ -98,6 +99,17 @@ export const StudioService = {
         }),
       ]);
 
+      // Never spread the raw thumbnail asset row: it carries the storage path and isn't loadable by the app.
+      const top = await Promise.all(
+        topVideos.map(async ({ thumbnailAsset, ...v }) => ({
+          ...v,
+          viewCount: Number(v.viewCount),
+          likeCount: Number(v.likeCount),
+          commentCount: Number(v.commentCount),
+          thumbnailUrl: await signImage(thumbnailAsset?.blobPath),
+        })),
+      );
+
       return {
         periodDays: days,
         totals: {
@@ -110,12 +122,7 @@ export const StudioService = {
         },
         period: { views: viewsInPeriod, newFollowers },
         viewsByDay: fillDailySeries(series, days),
-        topVideos: topVideos.map((v) => ({
-          ...v,
-          viewCount: Number(v.viewCount),
-          likeCount: Number(v.likeCount),
-          commentCount: Number(v.commentCount),
-        })),
+        topVideos: top,
       };
     } catch (error) {
       if (error instanceof ApiError) throw error;

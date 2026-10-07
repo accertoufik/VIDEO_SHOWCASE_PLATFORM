@@ -49,3 +49,10 @@ export const fillDailySeries = (rows: Array<{ day: Date; count: number }>, days:
   }
   return out;
 };
+
+/** Everything a video card needs: thumbnail, category, creator + their profile and avatar. */
+export const VIDEO_CARD_INCLUDE = {
+  thumbnailAsset: true,
+  category: true,
+  creator: { include: { user: { include: { profile: { include: { avatarAsset: true } } } } } },
+} as const;

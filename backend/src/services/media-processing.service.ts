@@ -5,6 +5,7 @@ import { ffmpeg } from '../config/ffmpeg';
 import type { ContainerName } from '../config/azure';
 import { AzureStorageService } from './azure-storage.service';
 import { getDisplayDimensions } from '../lib/videoClassification';
+import { SubtitleService } from './subtitle.service';
 
 /**
  * The full quality ladder — the MAXIMUM set of rungs this platform will
@@ -227,11 +228,11 @@ const probeSourceMetadata = async (
  * 1080x1920, not 1920x1080), so a player picking a rung by resolution sees
  * the real shape.
  */
-const masterManifestLine = (rung: SizedRung) =>
-  `#EXT-X-STREAM-INF:BANDWIDTH=${rung.bitrateKbps * 1000},RESOLUTION=${rung.outWidth}x${rung.outHeight}\n${rung.label}/playlist.m3u8`;
+const masterManifestLine = (rung: SizedRung, withSubtitles = false) =>
+  `#EXT-X-STREAM-INF:BANDWIDTH=${rung.bitrateKbps * 1000},RESOLUTION=${rung.outWidth}x${rung.outHeight}${withSubtitles ? ',SUBTITLES="subs"' : ''}\n${rung.label}/playlist.m3u8`;
 
 const buildMasterManifestText = (rungs: SizedRung[]) =>
-  ['#EXTM3U', ...rungs.map(masterManifestLine)].join('\n');
+  ['#EXTM3U', ...rungs.map((rung) => masterManifestLine(rung))].join('\n');
 
 /**
  * Creates OR amends master.m3u8 to include the given rung(s), safely,
@@ -278,7 +279,9 @@ const upsertMasterManifest = async (
       );
       if (missing.length === 0) return;
 
-      const updated = `${content}\n${missing.map(masterManifestLine).join('\n')}`;
+      // If subtitles were already published into this master, new rungs must point at them too.
+      const withSubtitles = content.includes('GROUP-ID="subs"');
+      const updated = `${content}\n${missing.map((rung) => masterManifestLine(rung, withSubtitles)).join('\n')}`;
 
       try {
         await AzureStorageService.uploadTextIfMatch(
@@ -423,6 +426,20 @@ export const MediaProcessingService = {
       // WORKER_CONCURRENCY), so this can no longer assume it's always the
       // first writer.
       await upsertMasterManifest(masterBlobPath, rungs);
+
+      // Subtitle tracks inside the upload (e.g. an .mkv with English captions) become a captions menu in the player.
+      try {
+        const published = await SubtitleService.publish({
+          inputPath,
+          workDir,
+          baseName,
+          masterBlobPath,
+          durationMs: source.durationMs,
+        });
+        if (published > 0) console.log(`Published ${published} subtitle track(s) for ${originalBlobPath}`);
+      } catch (error) {
+        console.warn(`Subtitle extraction skipped for ${originalBlobPath}:`, (error as Error).message);
+      }
 
       // Tells the caller EXACTLY which HD rungs this source actually
       // qualifies for — e.g. a 1080p source qualifies for '1080p' only,
