@@ -119,7 +119,7 @@ const CreatorScreen = () => {
             </View>
           ) : (
             <View key={video.id} style={styles.item}>
-              <VideoCard video={video} />
+              <VideoCard video={video} hideCreator />
             </View>
           ),
         )}
