@@ -1,9 +1,9 @@
-import { ClerkLoaded, ClerkProvider, useAuth } from '@clerk/clerk-expo';
+import { ClerkProvider, useAuth } from '@clerk/clerk-expo';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Stack, usePathname, useRouter } from 'expo-router';
 import { lockToPortrait } from '@/lib/orientation';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { StyleSheet } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import * as SplashScreen from 'expo-splash-screen';
@@ -18,6 +18,7 @@ import {
 import { BitcountInk_700Bold, useFonts as useBitcount } from '@expo-google-fonts/bitcount-ink';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { FullScreenLoader } from '@/components/navigation/FullScreenLoader';
 import { GlassDock } from '@/components/navigation/GlassDock';
 import { FullscreenProvider } from '@/components/video/FullscreenHost';
 import { SessionRecovery } from '@/features/auth/SessionRecovery';
@@ -48,6 +49,13 @@ export { AppErrorBoundary as ErrorBoundary } from '@/components/ui/AppErrorBound
 
 // Deep links into (public)/video/[id] etc. still get the tabs underneath for a sensible Back.
 export const unstable_settings = { anchor: '(tabs)' };
+
+// While Clerk restores the saved login, show the Tamasha loading screen (the one the native splash hands over to)
+// instead of a blank page. Replaces <ClerkLoaded>, which renders nothing until it is ready.
+const AuthReady = ({ children }: { children: ReactNode }) => {
+  const { isLoaded } = useAuth();
+  return isLoaded ? <>{children}</> : <FullScreenLoader />;
+};
 
 const AuthCacheReset = () => {
   const { userId } = useAuth();
@@ -116,7 +124,7 @@ const RootLayout = () => {
       publishableKey={CLERK_PUBLISHABLE_KEY}
       tokenCache={tokenCache}
     >
-      <ClerkLoaded>
+      <AuthReady>
         <QueryClientProvider client={queryClient}>
           <SafeAreaProvider>
             <FullscreenProvider>
@@ -154,7 +162,7 @@ const RootLayout = () => {
             </FullscreenProvider>
           </SafeAreaProvider>
         </QueryClientProvider>
-      </ClerkLoaded>
+      </AuthReady>
     </ClerkProvider>
     </GestureHandlerRootView>
   );
