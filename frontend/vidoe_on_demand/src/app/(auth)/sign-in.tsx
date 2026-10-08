@@ -101,7 +101,7 @@ const SignInScreen = () => {
     setError(
       attempt.status === 'needs_new_password'
         ? 'This account needs a new password. Reset it from the Clerk sign-in page or ask an admin.'
-        : `This account needs a verification step the app can't do yet (${attempt.status}).`,
+        : "We couldn't finish signing you in. Please try again.",
     );
   };
 

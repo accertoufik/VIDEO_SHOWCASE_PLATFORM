@@ -118,14 +118,12 @@ export const SocialAuthButtons = ({
       }
       // 3) A new account that Clerk says is missing details.
       if (signUp?.status === 'missing_requirements') {
-        onError?.(`Google sign-in needs more details: ${(signUp.missingFields ?? []).join(', ') || 'unknown'}.`);
+        onError?.('We need a bit more information to finish creating your account. Please sign up with email instead.');
         return;
       }
       // 4) The browser was closed, cancelled, or never handed the result back. Say so (with the reason) instead of
       // silently doing nothing, unless the user plainly backed out.
-      onError?.(
-        `Google sign-in didn't finish (browser: ${authSessionResult?.type ?? 'none'}, link: ${redirectedUrl ? 'yes' : 'no'}, status: ${signIn?.status ?? signUp?.status ?? 'none'}). Please try again.`,
-      );
+      onError?.("Sign-in didn't finish. Please try again.");
     } catch (e) {
       // "Session already exists": the login is there but not active in the app. Activate it instead of showing an error.
       const code = (e as { errors?: Array<{ code?: string }> } | null)?.errors?.[0]?.code;
