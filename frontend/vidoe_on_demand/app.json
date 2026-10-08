@@ -47,7 +47,6 @@
           "microphonePermission": false
         }
       ],
-      "@clerk/expo",
       "expo-video"
     ],
     "experiments": {
