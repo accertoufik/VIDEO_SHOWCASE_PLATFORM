@@ -2,7 +2,8 @@ import { useClerk, useSSO } from '@clerk/clerk-expo';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import { StyleSheet, View } from 'react-native';
 import { GlassButton } from '@/components/ui/GlassButton';
 import { AppText } from '@/components/ui/Text';
@@ -35,12 +36,21 @@ export const SocialAuthButtons = ({
   const router = useRouter();
   const [busy, setBusy] = useState<Provider | null>(null);
 
+  // Android: pre-start the Chrome Custom Tab so the Google page opens fast and hands the result back reliably.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    void WebBrowser.warmUpAsync().catch(() => {});
+    return () => {
+      void WebBrowser.coolDownAsync().catch(() => {});
+    };
+  }, []);
+
   const start = async (strategy: Provider) => {
     if (busy) return;
     setBusy(strategy);
     onError?.(null);
     try {
-      const { createdSessionId, setActive, signIn, signUp } = await startSSOFlow({
+      const { createdSessionId, setActive, signIn, signUp, authSessionResult } = await startSSOFlow({
         strategy,
         redirectUrl: AuthSession.makeRedirectUri(),
       });
@@ -66,7 +76,7 @@ export const SocialAuthButtons = ({
         }
       }
       // 2) An existing account that needs a verification code (new device, two-step): continue on the sign-in screen.
-      if (signIn && ['needs_second_factor', 'needs_first_factor', 'needs_client_trust'].includes(signIn.status ?? '')) {
+      if (authSessionResult?.type === 'success' && signIn && ['needs_second_factor', 'needs_first_factor', 'needs_client_trust'].includes(signIn.status ?? '')) {
         router.replace({ pathname: '/sign-in', params: { resume: '1' } });
         return;
       }
@@ -75,10 +85,12 @@ export const SocialAuthButtons = ({
         onError?.(`Google sign-in needs more details: ${(signUp.missingFields ?? []).join(', ') || 'unknown'}.`);
         return;
       }
-      // 4) The browser was closed or the user cancelled: nothing to say. Anything else gets a message.
-      if (signIn?.status || signUp?.status) {
-        onError?.(`Google sign-in didn't finish (${signIn?.status ?? signUp?.status}). Please try again.`);
-      }
+      // 4) The browser was closed, cancelled, or never handed the result back. Say so (with the reason) instead of
+      // silently doing nothing, unless the user plainly backed out.
+      if (authSessionResult?.type === 'cancel') return;
+      onError?.(
+        `Google sign-in didn't finish (browser: ${authSessionResult?.type ?? 'none'}, status: ${signIn?.status ?? signUp?.status ?? 'none'}). Please try again.`,
+      );
     } catch (e) {
       // "Session already exists": the login is there but not active in the app. Activate it instead of showing an error.
       const code = (e as { errors?: Array<{ code?: string }> } | null)?.errors?.[0]?.code;
