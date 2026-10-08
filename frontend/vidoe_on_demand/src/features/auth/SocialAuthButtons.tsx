@@ -1,6 +1,7 @@
 import { useClerk, useSSO } from '@clerk/clerk-expo';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
@@ -49,6 +50,12 @@ export const SocialAuthButtons = ({
     if (busy) return;
     setBusy(strategy);
     onError?.(null);
+    // Android sometimes reports the browser as "cancel" even though the redirect brought the app back, so the
+    // hook never sees the one-time token. Catch the redirect link ourselves as a backup.
+    let redirectedUrl: string | null = null;
+    const linkSub = Linking.addEventListener('url', ({ url }) => {
+      if (url.includes('rotating_token_nonce')) redirectedUrl = url;
+    });
     try {
       const { createdSessionId, setActive, signIn, signUp, authSessionResult } = await startSSOFlow({
         strategy,
@@ -57,6 +64,23 @@ export const SocialAuthButtons = ({
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });
         return;
+      }
+
+      // The hook missed the redirect but we caught it: finish the sign-in with the token from that link.
+      if (redirectedUrl && authSessionResult?.type !== 'success' && signIn) {
+        const nonce = new URL(redirectedUrl).searchParams.get('rotating_token_nonce') ?? '';
+        const reloaded = await signIn.reload({ rotatingTokenNonce: nonce });
+        if (reloaded.status === 'complete' && reloaded.createdSessionId && setActive) {
+          await setActive({ session: reloaded.createdSessionId });
+          return;
+        }
+        if (reloaded.firstFactorVerification?.status === 'transferable' && signUp) {
+          const moved = await signUp.create({ transfer: true });
+          if (moved.createdSessionId && setActive) {
+            await setActive({ session: moved.createdSessionId });
+            return;
+          }
+        }
       }
 
       // No session yet. Clerk may need one more step; handle each case instead of silently doing nothing.
@@ -87,9 +111,8 @@ export const SocialAuthButtons = ({
       }
       // 4) The browser was closed, cancelled, or never handed the result back. Say so (with the reason) instead of
       // silently doing nothing, unless the user plainly backed out.
-      if (authSessionResult?.type === 'cancel') return;
       onError?.(
-        `Google sign-in didn't finish (browser: ${authSessionResult?.type ?? 'none'}, status: ${signIn?.status ?? signUp?.status ?? 'none'}). Please try again.`,
+        `Google sign-in didn't finish (browser: ${authSessionResult?.type ?? 'none'}, link: ${redirectedUrl ? 'yes' : 'no'}, status: ${signIn?.status ?? signUp?.status ?? 'none'}). Please try again.`,
       );
     } catch (e) {
       // "Session already exists": the login is there but not active in the app. Activate it instead of showing an error.
@@ -105,6 +128,7 @@ export const SocialAuthButtons = ({
       }
       onError?.(clerkErrorMessage(e));
     } finally {
+      linkSub.remove();
       setBusy(null);
     }
   };
