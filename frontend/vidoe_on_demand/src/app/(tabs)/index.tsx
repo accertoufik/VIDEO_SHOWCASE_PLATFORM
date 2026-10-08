@@ -17,6 +17,7 @@ import { VideoCard, VideoCardSkeleton } from '@/components/video';
 import { colors, layout, spacing } from '@/css';
 import { CategoryRow } from '@/features/home/CategoryRow';
 import { HomeHeader } from '@/features/home/HomeHeader';
+import { UpdateBanner } from '@/features/update/UpdateBanner';
 import { TrendingSection } from '@/features/home/TrendingSection';
 import { useCategories } from '@/hooks/queries/useCategories';
 import { useFeed } from '@/hooks/queries/useFeed';
@@ -87,6 +88,7 @@ const HomeScreen = () => {
         onSearch={() => router.push('/search')}
         onProfile={() => router.push(isSignedIn ? '/profile' : signInHref('/'))}
       />
+      <UpdateBanner />
       <CategoryRow
         categories={categories.data}
         loading={categories.isPending}

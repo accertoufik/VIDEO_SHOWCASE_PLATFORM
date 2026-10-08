@@ -11,7 +11,9 @@
       },
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://tamasha-api.redflower-41105e03.centralindia.azurecontainerapps.io"
-      }
+      },
+      "channel": "preview",
+      "autoIncrement": true
     }
   }
 }
