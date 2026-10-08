@@ -1,7 +1,7 @@
 import { useClerk, useSignIn } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import { Link, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { GlassButton } from '@/components/ui/GlassButton';
 import { AppText } from '@/components/ui/Text';
@@ -24,11 +24,13 @@ const SignInScreen = () => {
     email: emailParam,
     created,
     reset,
+    resume,
   } = useLocalSearchParams<{
     redirect?: string;
     email?: string;
     created?: string;
     reset?: string;
+    resume?: string;
   }>();
   const [email, setEmail] = useState(emailParam ?? '');
   const [password, setPassword] = useState('');
@@ -127,6 +129,15 @@ const SignInScreen = () => {
       setLoading(false);
     }
   };
+
+  // Arriving from "Continue with Google" with a sign-in that still needs a code: show the code step straight away.
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (resume !== '1' || resumed.current || !isLoaded || !signIn || factor) return;
+    resumed.current = true;
+    void run(() => finish(signIn));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resume, isLoaded, signIn]);
 
   const onSubmit = () =>
     run(async () => {

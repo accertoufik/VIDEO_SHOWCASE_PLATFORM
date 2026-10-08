@@ -1,6 +1,7 @@
 import { useClerk, useSSO } from '@clerk/clerk-expo';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { GlassButton } from '@/components/ui/GlassButton';
@@ -31,6 +32,7 @@ export const SocialAuthButtons = ({
 }: Props) => {
   const { startSSOFlow } = useSSO();
   const clerk = useClerk();
+  const router = useRouter();
   const [busy, setBusy] = useState<Provider | null>(null);
 
   const start = async (strategy: Provider) => {
@@ -38,14 +40,45 @@ export const SocialAuthButtons = ({
     setBusy(strategy);
     onError?.(null);
     try {
-      const { createdSessionId, setActive } = await startSSOFlow({
+      const { createdSessionId, setActive, signIn, signUp } = await startSSOFlow({
         strategy,
         redirectUrl: AuthSession.makeRedirectUri(),
       });
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });
+        return;
       }
-      // No session id = the user closed the browser, or Clerk needs more info; nothing to show.
+
+      // No session yet. Clerk may need one more step; handle each case instead of silently doing nothing.
+      // 1) The Google account has no Tamasa account yet (or the reverse): Clerk asks us to "transfer" the attempt.
+      if (signIn?.firstFactorVerification?.status === 'transferable' && signUp) {
+        const moved = await signUp.create({ transfer: true });
+        if (moved.createdSessionId && setActive) {
+          await setActive({ session: moved.createdSessionId });
+          return;
+        }
+      }
+      if (signUp?.verifications?.externalAccount?.status === 'transferable' && signIn) {
+        const moved = await signIn.create({ transfer: true });
+        if (moved.createdSessionId && setActive) {
+          await setActive({ session: moved.createdSessionId });
+          return;
+        }
+      }
+      // 2) An existing account that needs a verification code (new device, two-step): continue on the sign-in screen.
+      if (signIn && ['needs_second_factor', 'needs_first_factor', 'needs_client_trust'].includes(signIn.status ?? '')) {
+        router.replace({ pathname: '/sign-in', params: { resume: '1' } });
+        return;
+      }
+      // 3) A new account that Clerk says is missing details.
+      if (signUp?.status === 'missing_requirements') {
+        onError?.(`Google sign-in needs more details: ${(signUp.missingFields ?? []).join(', ') || 'unknown'}.`);
+        return;
+      }
+      // 4) The browser was closed or the user cancelled: nothing to say. Anything else gets a message.
+      if (signIn?.status || signUp?.status) {
+        onError?.(`Google sign-in didn't finish (${signIn?.status ?? signUp?.status}). Please try again.`);
+      }
     } catch (e) {
       // "Session already exists": the login is there but not active in the app. Activate it instead of showing an error.
       const code = (e as { errors?: Array<{ code?: string }> } | null)?.errors?.[0]?.code;
