@@ -52,6 +52,8 @@ type Props = {
   disabled?: boolean;
   fullWidth?: boolean;
   haptic?: boolean;
+  /** For toggle buttons (Like, Save): announced as selected / not selected. */
+  selected?: boolean;
   accessibilityLabel?: string;
   style?: StyleProp<ViewStyle>;
 };
@@ -66,6 +68,7 @@ export const GlassButton = ({
   disabled = false,
   fullWidth = false,
   haptic = true,
+  selected,
   accessibilityLabel,
   style,
 }: Props) => {
@@ -90,7 +93,7 @@ export const GlassButton = ({
       onPressOut={() => setPressed(false)}
       disabled={inactive}
       accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ disabled: inactive, busy: loading }}
+      accessibilityState={{ disabled: inactive, busy: loading, ...(selected !== undefined ? { selected } : null) }}
       hitSlop={size === 'sm' ? { top: 4, bottom: 4 } : undefined}
       style={[
         styles.base,

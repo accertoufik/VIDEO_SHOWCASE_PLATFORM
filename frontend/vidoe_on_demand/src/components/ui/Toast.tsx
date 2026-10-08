@@ -4,6 +4,7 @@ import { Pressable, StyleSheet } from 'react-native';
 import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, layout, motion, spacing } from '@/css';
+import { announce } from '@/lib/a11y/announce';
 import { errorBus } from '@/lib/errors/errorBus';
 import { toast, type ToastEvent } from '@/lib/toast';
 import { GlassSurface } from './GlassSurface';
@@ -16,6 +17,7 @@ const tone = {
 } as const;
 
 const VISIBLE_MS = 3500;
+const VISIBLE_ERROR_MS = 5500; // errors stay long enough to be read (or heard) in full
 const DEDUPE_MS = 1500;
 
 /**
@@ -43,7 +45,8 @@ export const ToastHost = () => {
       last.current = { message: event.message, at: now };
       setCurrent({ ...event, id: now });
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setCurrent(null), VISIBLE_MS);
+      announce(event.message);
+      timer.current = setTimeout(() => setCurrent(null), event.tone === 'error' ? VISIBLE_ERROR_MS : VISIBLE_MS);
     };
 
     const offToast = toast.subscribe(show);

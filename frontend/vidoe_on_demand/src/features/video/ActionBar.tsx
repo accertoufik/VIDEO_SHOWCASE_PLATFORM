@@ -96,6 +96,7 @@ export const ActionBar = ({ video, viewer, onOpenComments }: Props) => {
         label={formatCount(video.likeCount)}
         icon={liked ? 'heart' : 'heart-outline'}
         variant={liked ? 'primary' : 'glass'}
+        selected={liked}
         size='sm'
         accessibilityLabel={
           liked
@@ -108,6 +109,7 @@ export const ActionBar = ({ video, viewer, onOpenComments }: Props) => {
         label={saved ? 'Saved' : 'Save'}
         icon={saved ? 'bookmark' : 'bookmark-outline'}
         variant={saved ? 'primary' : 'glass'}
+        selected={saved}
         size='sm'
         onPress={onSave}
       />

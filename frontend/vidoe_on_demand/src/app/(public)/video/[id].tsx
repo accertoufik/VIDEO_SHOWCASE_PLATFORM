@@ -3,7 +3,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { EmptyState } from '@/components/ui/EmptyState';
+import { Ionicons } from '@expo/vector-icons';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { VideoUnavailable } from '@/features/video/VideoUnavailable';
 import { describeError } from '@/lib/errors/describeError';
@@ -152,11 +152,12 @@ const VideoScreen = () => {
               onRetry={() => related.refetch()}
             />
           ) : (
-            <EmptyState
-              icon='film-outline'
-              title='Nothing up next'
-              message='No related videos yet.'
-            />
+            <View style={styles.noRelated}>
+              <Ionicons name='film-outline' size={28} color={colors.text.primary} />
+              <AppText variant='body' color='secondary'>
+                No more videos to show yet
+              </AppText>
+            </View>
           )
         }
         contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xxl }}
@@ -173,6 +174,7 @@ const styles = StyleSheet.create({
   details: { padding: layout.screenPadding, gap: spacing.xs },
   item: { paddingHorizontal: layout.screenPadding, marginBottom: spacing.lg },
   skeletonBody: { padding: layout.screenPadding, gap: spacing.md },
+  noRelated: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xxl },
   processing: {
     position: 'absolute',
     left: 0,
