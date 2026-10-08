@@ -23,7 +23,7 @@ const CreateScreen = () => {
           Create
         </AppText>
         <AppText variant='body' color='secondary'>
-          Share your story with Tamasha
+          Share your story with Tamasa
         </AppText>
       </View>
 

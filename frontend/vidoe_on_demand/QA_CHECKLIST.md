@@ -1,4 +1,4 @@
-# Tamasha: device QA checklist
+# Tamasa: device QA checklist
 
 Tick each item on a real phone against the real backend. Log anything that fails in the table at the bottom, fix it, then
 re-run the whole flow (not just the failed step).

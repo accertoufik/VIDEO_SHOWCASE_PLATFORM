@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Tamasha",
+    "name": "Tamasa",
     "slug": "vidoe_on_demand",
     "version": "1.0.0",
     "orientation": "default",
@@ -17,7 +17,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "backgroundColor": "#12121A",
-      "package": "com.toufik.tamasha",
+      "package": "com.toufik.tamasa",
       "versionCode": 1
     },
     "web": {
@@ -41,7 +41,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Tamasha to access your photos so you can choose a profile picture and banner.",
+          "photosPermission": "Allow Tamasa to access your photos so you can choose a profile picture and banner.",
           "microphonePermission": false
         }
       ],

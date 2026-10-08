@@ -50,7 +50,7 @@ export { AppErrorBoundary as ErrorBoundary } from '@/components/ui/AppErrorBound
 // Deep links into (public)/video/[id] etc. still get the tabs underneath for a sensible Back.
 export const unstable_settings = { anchor: '(tabs)' };
 
-// While Clerk restores the saved login, show the Tamasha loading screen (the one the native splash hands over to)
+// While Clerk restores the saved login, show the Tamasa loading screen (the one the native splash hands over to)
 // instead of a blank page. Replaces <ClerkLoaded>, which renders nothing until it is ready.
 const AuthReady = ({ children }: { children: ReactNode }) => {
   const { isLoaded } = useAuth();
