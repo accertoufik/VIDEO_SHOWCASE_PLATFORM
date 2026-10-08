@@ -40,7 +40,7 @@ export const VideoCard = memo(({ video, hideCreator = false }: Props) => {
           accessibilityLabel={`Open ${video.creator.name}'s channel`}
           onPress={openChannel}
         >
-          <Avatar uri={video.creator.avatarUrl} name={video.creator.name} size='sm' />
+          <Avatar uri={video.creator.avatarUrl} name={video.creator.name} size='md' />
         </PressableScale>
         <PressableScale style={styles.text} accessibilityRole='button' accessibilityLabel={videoA11yLabel(video)} onPress={openVideo}>
           <AppText variant='title' numberOfLines={2}>
@@ -65,6 +65,7 @@ export const VideoCard = memo(({ video, hideCreator = false }: Props) => {
 VideoCard.displayName = 'VideoCard';
 
 const styles = StyleSheet.create({
-  meta: { flexDirection: 'row', gap: spacing.md, paddingTop: spacing.md },
+  // Avatar is centred against the title + info lines (22 + 19 dp of text), so the three line up.
+  meta: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingTop: spacing.md },
   text: { flex: 1, gap: spacing.xs },
 });
