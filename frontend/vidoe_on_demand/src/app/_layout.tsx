@@ -22,6 +22,7 @@ import { FullScreenLoader } from '@/components/navigation/FullScreenLoader';
 import { GlassDock } from '@/components/navigation/GlassDock';
 import { FullscreenProvider } from '@/components/video/FullscreenHost';
 import { SessionRecovery } from '@/features/auth/SessionRecovery';
+import { UpdatePrompt } from '@/features/update/UpdatePrompt';
 import { DownloadsAccountSync } from '@/features/downloads/DownloadsAccountSync';
 import { VideoReadyWatcher } from '@/features/creator/VideoReadyWatcher';
 import { stackScreenOptions } from '@/components/navigation/stackScreenOptions';
@@ -158,6 +159,7 @@ const RootLayout = () => {
             <VideoReadyWatcher />
             <DownloadsAccountSync />
             <OfflineBanner />
+            <UpdatePrompt />
             <ToastHost />
             </FullscreenProvider>
           </SafeAreaProvider>
