@@ -26,7 +26,7 @@ import {
 import { useCategories } from '@/hooks/queries/useCategories';
 import { Thumbnail } from '@/components/video/Thumbnail';
 import { describeError } from '@/lib/errors/describeError';
-import { pickImage } from '@/lib/media/pickImage';
+import { pickImage, type PickedImage } from '@/lib/media/pickImage';
 import { toast } from '@/lib/toast';
 import type { MyVideo } from '@/types/creatorVideo';
 
@@ -46,6 +46,8 @@ export const EditVideoSheet = ({ video, onClose }: Props) => {
   const [title, setTitle] = useState(video.title);
   const [description, setDescription] = useState(video.description ?? '');
   const [categoryId, setCategoryId] = useState<string | null>(video.categoryId);
+  // A picked-but-not-saved thumbnail: shown in the preview now, uploaded only when "Save changes" is tapped.
+  const [newThumbnail, setNewThumbnail] = useState<PickedImage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const busy = update.isPending || remove.isPending || changeThumbnail.isPending;
@@ -59,7 +61,7 @@ export const EditVideoSheet = ({ video, onClose }: Props) => {
       : {}),
     ...(categoryId && categoryId !== video.categoryId ? { categoryId } : {}),
   };
-  const dirty = Object.keys(changes).length > 0;
+  const dirty = Object.keys(changes).length > 0 || newThumbnail !== null;
 
   const fail = (e: unknown) =>
     setError(isApiError(e) ? e.message : describeError(e).message);
@@ -68,31 +70,27 @@ export const EditVideoSheet = ({ video, onClose }: Props) => {
     setError(null);
     try {
       const image = await pickImage('thumbnail');
-      if (!image) return;
-      changeThumbnail.mutate(
-        { videoId: video.id, image },
-        {
-          onSuccess: () => toast.success('Thumbnail updated'),
-          onError: fail,
-        },
-      );
+      if (image) setNewThumbnail(image);
     } catch {
       toast.error("Couldn't open your library. Check the app's photo permission in Settings.");
     }
   };
 
-  const save = () => {
+  // Text changes first, then the thumbnail; nothing is sent until now.
+  const save = async () => {
     setError(null);
-    update.mutate(
-      { videoId: video.id, changes },
-      {
-        onSuccess: () => {
-          toast.success('Video updated');
-          onClose();
-        },
-        onError: fail,
-      },
-    );
+    try {
+      if (Object.keys(changes).length > 0) {
+        await update.mutateAsync({ videoId: video.id, changes });
+      }
+      if (newThumbnail) {
+        await changeThumbnail.mutateAsync({ videoId: video.id, image: newThumbnail });
+      }
+      toast.success('Video updated');
+      onClose();
+    } catch (e) {
+      fail(e);
+    }
   };
 
   const confirmDelete = () =>
@@ -151,13 +149,12 @@ export const EditVideoSheet = ({ video, onClose }: Props) => {
             >
               <View style={styles.group}>
                 <AppText variant='label'>Thumbnail</AppText>
-                <Thumbnail uri={video.thumbnailUrl} durationMs={video.durationSec != null ? video.durationSec * 1000 : null} radius='md' />
+                <Thumbnail uri={newThumbnail?.uri ?? video.thumbnailUrl} durationMs={video.durationSec != null ? video.durationSec * 1000 : null} radius='md' />
                 <GlassButton
-                  label='Change thumbnail'
+                  label={newThumbnail ? 'Choose a different image' : 'Change thumbnail'}
                   icon='image-outline'
                   variant='glass'
                   fullWidth
-                  loading={changeThumbnail.isPending}
                   disabled={busy}
                   onPress={pickThumbnail}
                 />
@@ -212,7 +209,7 @@ export const EditVideoSheet = ({ video, onClose }: Props) => {
                 variant='primary'
                 size='lg'
                 fullWidth
-                loading={update.isPending}
+                loading={update.isPending || changeThumbnail.isPending}
                 disabled={!dirty || !trimmedTitle || busy}
                 onPress={save}
               />
