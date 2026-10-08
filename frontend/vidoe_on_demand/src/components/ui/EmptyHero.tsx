@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { ComponentProps } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { colors, radii, spacing } from '@/css';
+import { colors, spacing } from '@/css';
 import { GlassButton } from './GlassButton';
 import { AppText } from './Text';
 
@@ -14,14 +14,10 @@ type Props = {
   action?: { label: string; icon?: IconName; onPress: () => void };
 };
 
-/** A friendlier empty screen: a ringed icon tile, a title, a short message and (optionally) one clear next step. */
+/** Empty screen: a plain icon, a title, and optionally a short message and one next step. */
 export const EmptyHero = ({ icon, title, message, action }: Props) => (
   <View style={styles.root}>
-    <View style={styles.ring}>
-      <View style={styles.tile}>
-        <Ionicons name={icon} size={32} color={colors.accent.text} />
-      </View>
-    </View>
+    <Ionicons name={icon} size={44} color={colors.text.muted} />
     <View style={styles.text}>
       <AppText variant='h3' style={styles.center}>
         {title}
@@ -39,30 +35,9 @@ export const EmptyHero = ({ icon, title, message, action }: Props) => (
 const styles = StyleSheet.create({
   root: {
     alignItems: 'center',
-    gap: spacing.xl,
+    gap: spacing.md,
     paddingVertical: spacing.section,
     paddingHorizontal: spacing.xxl,
-  },
-  ring: {
-    width: 112,
-    height: 112,
-    borderRadius: radii.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.surface.borderStrong,
-    backgroundColor: colors.accent.primarySoft,
-  },
-  tile: {
-    width: 72,
-    height: 72,
-    borderRadius: radii.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.surface.border,
-    backgroundColor: colors.surface.elevated,
   },
   text: { gap: spacing.xs, alignItems: 'center', maxWidth: 320 },
   center: { textAlign: 'center' },

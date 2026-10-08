@@ -51,7 +51,6 @@ const NoResults = ({ q }: { q: string }) => (
   <EmptyHero
     icon='search-outline'
     title={`No results for “${q}”`}
-    message='Check the spelling, try a shorter word, or search by topic or creator name.'
   />
 );
 

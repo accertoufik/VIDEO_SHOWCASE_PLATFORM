@@ -111,13 +111,7 @@ const HomeScreen = () => {
   ) : (
     <EmptyHero
       icon={categoryId ? 'albums-outline' : 'film-outline'}
-      title={categoryId ? 'No videos in this category yet' : 'No videos yet'}
-      message={
-        categoryId
-          ? 'Creators haven’t posted here yet. Pick another category to keep exploring.'
-          : 'Public videos will appear here.'
-      }
-      action={categoryId ? { label: 'Show all videos', icon: 'apps-outline', onPress: () => setCategoryId(undefined) } : undefined}
+      title={categoryId ? 'No videos in this category' : 'No videos yet'}
     />
   );
 
