@@ -43,7 +43,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Tamasha to access your photos so you can choose a profile picture and banner."
+          "photosPermission": "Allow Tamasha to access your photos so you can choose a profile picture and banner.",
+          "microphonePermission": false
         }
       ],
       "@clerk/expo",
@@ -53,6 +54,13 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "backgroundColor": "#12121A"
+    "backgroundColor": "#12121A",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "833799d4-cf8f-4ec6-b2fb-6352352b2f15"
+      }
+    },
+    "owner": "accertoufik"
   }
 }
