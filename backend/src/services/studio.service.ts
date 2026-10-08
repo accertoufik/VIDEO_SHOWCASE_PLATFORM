@@ -83,7 +83,10 @@ export const StudioService = {
           where: {
             creatorId: creator.id,
             deletedAt: null,
-            status: { in: ['READY', 'PUBLISHED'] },
+            // Only videos that are live for everyone. A draft (ready but unpublished) or a private video is not "top
+            // performing", however it is doing.
+            status: 'PUBLISHED',
+            visibility: 'PUBLIC',
           },
           orderBy: [{ viewCount: 'desc' }, { id: 'desc' }],
           take: 5,

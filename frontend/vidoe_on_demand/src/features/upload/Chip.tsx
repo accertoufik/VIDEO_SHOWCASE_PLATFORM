@@ -1,3 +1,4 @@
+import { hitSlopFor } from '@/lib/a11y/hitSlop';
 import { haptics } from '@/lib/haptics';
 import { StyleSheet } from 'react-native';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -18,6 +19,7 @@ export const Chip = ({ label, selected, onPress, disabled }: Props) => (
       onPress();
     }}
     disabled={disabled}
+    hitSlop={hitSlopFor(layout.minTouchTarget - spacing.sm)}
     accessibilityRole='radio'
     accessibilityState={{ selected, disabled }}
     accessibilityLabel={label}

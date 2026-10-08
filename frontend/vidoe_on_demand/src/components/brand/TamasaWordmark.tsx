@@ -11,7 +11,7 @@ export const TamasaWordmark = ({ size = 28, color = colors.text.primary, style }
   <Text
     accessibilityRole='header'
     accessibilityLabel={BRAND_NAME}
-    allowFontScaling={false}
+    maxFontSizeMultiplier={1.2}
     style={[typography.brand, styles.text, { fontSize: size, lineHeight: size * 1.2, color }, style]}
   >
     {BRAND_NAME}

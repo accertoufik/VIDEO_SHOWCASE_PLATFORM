@@ -1,6 +1,7 @@
 import { Image, type ImageProps, type ImageSource } from 'expo-image';
 import { useMemo } from 'react';
 import { colors, motion } from '@/css';
+import { useReduceMotion } from '@/lib/a11y/useReduceMotion';
 
 /**
  * Signed URLs change on every API response (a new ?sig=...), which would defeat the image cache and
@@ -11,11 +12,13 @@ const stableKey = (uri: string) => uri.split('?')[0];
 
 export const RemoteImage = ({
   source,
-  transition = motion.fast,
+  transition,
   cachePolicy = 'memory-disk',
   style,
   ...rest
 }: ImageProps) => {
+  const reduceMotion = useReduceMotion();
+  const fade = transition ?? (reduceMotion ? 0 : motion.fast);
   const resolved = useMemo(() => {
     if (
       source &&
@@ -33,7 +36,7 @@ export const RemoteImage = ({
   return (
     <Image
       source={resolved}
-      transition={transition}
+      transition={fade}
       cachePolicy={cachePolicy}
       style={[{ backgroundColor: colors.surface.glassMedium }, style]}
       {...rest}

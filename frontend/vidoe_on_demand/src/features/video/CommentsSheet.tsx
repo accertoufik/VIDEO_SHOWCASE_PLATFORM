@@ -103,7 +103,7 @@ export const CommentsSheet = ({ videoId, visible, count, onClose, belowPlayer = 
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <View style={styles.backdrop}>
+      <View style={styles.backdrop} accessibilityViewIsModal>
         <Pressable
           style={styles.dismiss}
           onPress={onClose}

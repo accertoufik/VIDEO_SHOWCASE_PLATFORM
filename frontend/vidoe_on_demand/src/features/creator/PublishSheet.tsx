@@ -72,7 +72,7 @@ export const PublishSheet = ({ video, onClose }: Props) => {
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <View style={styles.root}>
+      <View style={styles.root} accessibilityViewIsModal>
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={onClose}

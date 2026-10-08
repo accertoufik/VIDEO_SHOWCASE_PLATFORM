@@ -498,10 +498,15 @@ const dispatch = async (job: Job) => {
         return;
     }
 
-    if (job.type === "TRANSCODE_STANDARD") await processTranscodeStandardJob(job);
-    if (job.type === "TRANSCODE_1080P") await processTranscode1080pJob(job);
-    if (job.type === "TRANSCODE_1440P") await processTranscode1440pJob(job);
-    if (job.type === "THUMBNAIL") await processThumbnailJob(job);
+    const jobStart = Date.now();
+    try {
+        if (job.type === "TRANSCODE_STANDARD") await processTranscodeStandardJob(job);
+        if (job.type === "TRANSCODE_1080P") await processTranscode1080pJob(job);
+        if (job.type === "TRANSCODE_1440P") await processTranscode1440pJob(job);
+        if (job.type === "THUMBNAIL") await processThumbnailJob(job);
+    } finally {
+        console.log(`[timing] job ${job.type} for video ${job.videoId} took ${((Date.now() - jobStart) / 1000).toFixed(1)}s (queued jobs run ${WORKER_CONCURRENCY} at a time)`);
+    }
 
     await markStandardReadyIfDone(job.videoId);
 };

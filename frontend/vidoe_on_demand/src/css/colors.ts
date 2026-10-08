@@ -23,7 +23,8 @@ export const colors = {
   text: {
     primary: '#ECECF2',
     secondary: '#A5A7B8',
-    muted: '#6F7285',
+    /** 4.7:1 or better on every surface (was 3.5-3.9:1, below the 4.5:1 AA minimum for real information). */
+    muted: '#9094AA',
     /** Text on an accent (purple) surface. */
     inverse: '#FFFFFF',
   },

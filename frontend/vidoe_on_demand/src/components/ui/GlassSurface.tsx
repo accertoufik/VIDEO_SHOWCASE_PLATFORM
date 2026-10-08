@@ -17,6 +17,7 @@ import {
   radii,
   type GlassVariant,
 } from '@/css';
+import { useReduceTransparency } from '@/lib/a11y/useReduceTransparency';
 
 type Props = {
   variant?: GlassVariant;
@@ -34,7 +35,24 @@ export const GlassSurface = ({
   glow = false,
   children,
   style,
-}: Props) => (
+}: Props) => {
+  // iOS "Reduce Transparency": a solid surface (no live blur, no see-through fill), so text stays readable.
+  const solid = useReduceTransparency();
+  if (solid)
+    return (
+      <View
+        style={[
+          styles.base,
+          styles.solid,
+          { borderRadius: radii[radius], borderColor: colors.surface.borderStrong },
+          style,
+        ]}
+      >
+        {children}
+      </View>
+    );
+
+  return (
   <View
     style={[
       styles.base,
@@ -68,9 +86,11 @@ export const GlassSurface = ({
     ) : null}
     {children}
   </View>
-);
+  );
+};
 
 const styles = StyleSheet.create({
   base: { overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
   androidFill: { backgroundColor: colors.overlay.glassFlat },
+  solid: { backgroundColor: colors.background.elevated, borderWidth: StyleSheet.hairlineWidth },
 });

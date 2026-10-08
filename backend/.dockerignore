@@ -1,0 +1,13 @@
+node_modules
+generated
+.git
+.env
+.env.*
+*.md
+docs
+.agents
+.claude
+.windsurf
+skills-lock.json
+Dockerfile
+.dockerignore

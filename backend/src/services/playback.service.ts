@@ -7,6 +7,7 @@ import { ApiError } from "../middleware/errorHandler";
 const PUBLIC_STREAM_CACHE_MS = 30_000;
 const publicStreamBase = new Map<string, { baseName: string; expires: number }>();
 const viewerStreamBase = new Map<string, { baseName: string; expires: number }>();
+const ticketStreamBase = new Map<string, { baseName: string; expires: number }>();
 
 /** The subPath is the rest of the URL after the video ID, e.g. "master.m3u8" or "480p/480p0.ts". */
 const signStreamPath = async (baseName: string, subPath: string) => {
@@ -70,6 +71,23 @@ export const PlaybackService = {
             if (viewerStreamBase.size > 2000) viewerStreamBase.clear(); // bounded
             viewerStreamBase.set(viewerKey, { baseName, expires: Date.now() + PUBLIC_STREAM_CACHE_MS });
         }
+        return baseName;
+    },
+
+    /**
+     * The storage folder for a video whose caller holds a valid playback ticket. The ticket itself was only issued after
+     * the normal visibility check, so no per-viewer check is repeated here (only that the video still exists).
+     */
+    getStreamBaseForTicket: async (videoId: string): Promise<string> => {
+        const hit = ticketStreamBase.get(videoId);
+        if (hit && hit.expires > Date.now()) return hit.baseName;
+        const video = await prisma.video.findUnique({
+            where: { id: videoId },
+            select: { deletedAt: true, hlsManifestAsset: { select: { blobPath: true } } },
+        });
+        if (!video || video.deletedAt || !video.hlsManifestAsset) throw new ApiError(404, 'Video not found');
+        const baseName = video.hlsManifestAsset.blobPath.replace(/\/[^/]+$/, '');
+        ticketStreamBase.set(videoId, { baseName, expires: Date.now() + PUBLIC_STREAM_CACHE_MS });
         return baseName;
     },
 

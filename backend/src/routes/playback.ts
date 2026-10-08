@@ -5,6 +5,8 @@ import { sendSuccessResponse } from "../lib/apiResponse";
 import { asyncHandler } from "../lib/asyncHandler";
 import { streamRateLimiter } from "../middleware/ratelimit";
 import { PlaybackService } from "../services/playback.service";
+import { VideoService } from "../services/video.service";
+import { issuePlaybackTicket, verifyPlaybackTicket } from "../lib/playbackTicket";
 import { ApiError } from "../middleware/errorHandler";
 import { optionalAuth, authenticateUser, type AuthenticatedRequest } from "../middleware/auth";
 
@@ -98,6 +100,18 @@ const signSegmentLines = async (playlist: string, baseName: string, playlistPath
     return lines.join("\n");
 };
 
+/** Adds ?pt=<ticket> to every playlist a master playlist points at (rung playlists and subtitle playlists). */
+const withTicket = (master: string, ticket: string) =>
+    master
+        .split("\n")
+        .map((line) => {
+            const trimmed = line.trim();
+            if (!trimmed) return line;
+            if (trimmed.startsWith("#")) return line.replace(/URI="([^"]+)"/, (_m, uri) => `URI="${uri}?pt=${ticket}"`);
+            return trimmed.toLowerCase().endsWith(".m3u8") ? `${trimmed}?pt=${ticket}` : line;
+        })
+        .join("\n");
+
 playbackRouter.get(
     "/videos/:videoId/stream/*subPath",
     streamRateLimiter,
@@ -114,7 +128,12 @@ playbackRouter.get(
         const singleRung = /^master-(\d{3,4}p)\.m3u8$/.exec(subPath)?.[1];
 
         const videoId = requireVideoId(req.params.videoId);
-        const baseName = await PlaybackService.getStreamBase(videoId, req.auth?.userId);
+        // Private/unlisted playback: the player carries a ticket in the URL instead of a login header.
+        const ticket = typeof req.query.pt === "string" ? req.query.pt : undefined;
+        const holdsTicket = verifyPlaybackTicket(videoId, ticket);
+        const baseName = holdsTicket
+            ? await PlaybackService.getStreamBaseForTicket(videoId)
+            : await PlaybackService.getStreamBase(videoId, req.auth?.userId);
         const target = singleRung ? "master.m3u8" : subPath;
 
         // Segments (and subtitle files): redirect straight to a freshly signed storage URL.
@@ -142,7 +161,9 @@ playbackRouter.get(
         }
         res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
         res.setHeader("Cache-Control", "no-store");
-        res.status(200).send(text);
+        // The rung playlists named in a master are fetched next and need the ticket too (a relative URL doesn't inherit
+        // the query string). Segments are already direct signed storage links.
+        res.status(200).send(holdsTicket && isMaster && ticket ? withTicket(text, ticket) : text);
     }),
 );
 /**
@@ -206,5 +227,23 @@ playbackRouter.get(
 
         const progress = await PlaybackService.getProgress(requireVideoId(req.params.videoId), clerkUserId);
         sendSuccessResponse(res, { progress });
+    })
+);
+
+/**
+ * GET /api/videos/:videoId/playback-ticket
+ * For a video the caller may see but that isn't public (the owner previewing before publishing). Returns a short-lived
+ * ticket the player puts in the stream URL (?pt=...), so it needs no Authorization header. Same visibility rules as
+ * GET /api/videos/:id: a stranger gets 404.
+ */
+playbackRouter.get(
+    "/videos/:videoId/playback-ticket",
+    authenticateUser,
+    asyncHandler(async (req: AuthenticatedRequest, res) => {
+        const clerkUserId = req.auth?.userId;
+        if (!clerkUserId) throw new ApiError(401, "Unauthorized");
+        const videoId = requireVideoId(req.params.videoId);
+        await VideoService.getById(videoId, clerkUserId);
+        sendSuccessResponse(res, { ticket: issuePlaybackTicket(videoId) });
     })
 );

@@ -2,6 +2,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import { useEvent, useEventListener } from 'expo';
 import { NavigationBar } from 'expo-navigation-bar';
+import { useScreenReader } from '@/lib/a11y/useScreenReader';
 import { lockForFullscreenVideo, lockToPortrait } from '@/lib/orientation';
 import { useFullscreenLayer } from './FullscreenHost';
 import { StatusBar } from 'expo-status-bar';
@@ -22,7 +23,7 @@ import { RemoteImage } from '@/components/ui/RemoteImage';
 import { parseVtt, type Cue } from '@/lib/subtitles/vtt';
 import { SubtitleOverlay } from './SubtitleOverlay';
 import { VideoMiniProgress, VideoSeekBar } from './VideoSeekBar';
-import { recordWatch, saveProgress, type ProgressBody } from '@/api/playback';
+import { getPlaybackTicket, recordWatch, saveProgress, type ProgressBody } from '@/api/playback';
 import { GlassButton } from '@/components/ui/GlassButton';
 import { GlassIconButton } from '@/components/ui/GlassIconButton';
 import { GlassSurface } from '@/components/ui/GlassSurface';
@@ -31,7 +32,7 @@ import { colors, radii, spacing } from '@/css';
 import { API_BASE_URL } from '@/lib/config';
 import { useApi } from '@/lib/auth/useApi';
 import type { VideoDetail, ViewerState } from '@/types/video';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { resolveStreamQuality, usePreferences } from '@/lib/preferences';
 import { toast } from '@/lib/toast';
 
@@ -50,8 +51,10 @@ const speedLabel = (rate: number) => `${rate}x`;
 const CONTROLS_HIDE_MS = 3_000;
 
 /** "auto" = the adaptive master playlist. Otherwise a single rung, e.g. "720p". */
-const streamUrl = (videoId: string, quality: string) =>
-  `${API_BASE_URL}/api/videos/${videoId}/stream/${quality === 'auto' ? 'master.m3u8' : `master-${quality}.m3u8`}`;
+const streamUrl = (videoId: string, quality: string, ticket?: string) =>
+  `${API_BASE_URL}/api/videos/${videoId}/stream/${quality === 'auto' ? 'master.m3u8' : `master-${quality}.m3u8`}${
+    ticket ? `?pt=${ticket}` : ''
+  }`;
 
 // Full screen hides the phone's own navigation bar (Android's home / back buttons), which otherwise stays on one
 // edge of the video when the phone is turned sideways. Swiping from that edge brings it back briefly.
@@ -142,22 +145,29 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
   });
 
   // ---- load / switch source ----
-  // Public videos need no credentials. Non-public ones (the owner previewing) must send the Clerk token,
-  // because the manifest route authorises against it. NOTE: Clerk tokens are short-lived, so a very long
-  // private session can start failing segment requests. Fine for previews; public playback is unaffected.
+  // Public videos need nothing. A non-public one (the owner previewing a draft) gets a short-lived playback ticket from
+  // the server, carried in the URL. The login must NOT be sent as a header: the player would also send it to storage for
+  // every segment, and storage answers 400 to a request carrying both a signed link and an Authorization header (that
+  // was why unpublished videos said "can't play"). A ticket also outlives the ~60 s login token.
   const needsAuth = video.visibility !== 'PUBLIC';
+  const queryClient = useQueryClient();
+  const ticketFor = useCallback(
+    () =>
+      queryClient.fetchQuery({
+        queryKey: ['playback-ticket', video.id],
+        queryFn: () => getPlaybackTicket(api, video.id),
+        staleTime: 5 * 60 * 60_000,
+      }),
+    [queryClient, api, video.id],
+  );
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const token =
-          needsAuth && isSignedIn ? await getTokenRef.current() : null;
+        const ticket = needsAuth && isSignedIn ? await ticketFor() : undefined;
         if (cancelled) return;
         setLoadFailed(false);
-        await player.replaceAsync({
-          uri: streamUrl(video.id, quality),
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        });
+        await player.replaceAsync({ uri: streamUrl(video.id, quality, ticket) });
       } catch {
         if (!cancelled) setLoadFailed(true);
       }
@@ -165,7 +175,7 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
     return () => {
       cancelled = true;
     };
-  }, [player, video.id, quality, needsAuth, isSignedIn, attempt]);
+  }, [player, video.id, quality, needsAuth, isSignedIn, attempt, ticketFor]);
 
   // Captions. The video's master playlist lists any subtitle tracks that came inside the uploaded file; we read that
   // list, download the chosen track's WebVTT ourselves and draw it (SubtitleOverlay) in our own style. The player's
@@ -178,10 +188,8 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
   const captionTracks = useQuery({
     queryKey: ['captions', video.id],
     queryFn: async (): Promise<Caption[]> => {
-      const token = needsAuth && isSignedIn ? await getTokenRef.current() : null;
-      const res = await fetch(`${streamUrl(video.id, 'auto')}?subs=1`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
+      const ticket = needsAuth && isSignedIn ? await ticketFor() : undefined;
+      const res = await fetch(`${streamUrl(video.id, 'auto')}?subs=1${ticket ? `&pt=${ticket}` : ''}`);
       if (!res.ok) return [];
       return (await res.text())
         .split('\n')
@@ -230,8 +238,9 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
     let cancelled = false;
     (async () => {
       try {
+        const ticket = needsAuth && isSignedIn ? await ticketFor() : undefined;
         const res = await fetch(
-          `${API_BASE_URL}/api/videos/${video.id}/stream/${track.vttPath}`,
+          `${API_BASE_URL}/api/videos/${video.id}/stream/${track.vttPath}${ticket ? `?pt=${ticket}` : ''}`,
         );
         if (!res.ok) return;
         const parsed = parseVtt(await res.text());
@@ -244,7 +253,7 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
     return () => {
       cancelled = true;
     };
-  }, [captionKey, subtitleTracks, video.id]);
+  }, [captionKey, subtitleTracks, video.id, needsAuth, isSignedIn, ticketFor]);
 
   const trackKey = (track: Caption) => track.key;
   const subtitleLang = captionKey;
@@ -348,9 +357,12 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
 
   // ---- controls ----
   // Tap the video to show/hide the controls; they hide themselves a few seconds after playback continues.
+  // Controls that vanish after 3 s can't be found by a screen-reader user: keep them up while one is running.
+  const screenReaderOn = useScreenReader();
   const showControls = useCallback(() => {
     setControlsVisible(true);
     if (hideTimer.current) clearTimeout(hideTimer.current);
+    if (screenReaderOn) return;
     hideTimer.current = setTimeout(() => {
       // Keep the controls up while paused or finished, otherwise there's nothing to tap to resume.
       try {
@@ -359,7 +371,7 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
         // player already released
       }
     }, CONTROLS_HIDE_MS);
-  }, [player]);
+  }, [player, screenReaderOn]);
   useEffect(
     () => () => {
       if (hideTimer.current) clearTimeout(hideTimer.current);

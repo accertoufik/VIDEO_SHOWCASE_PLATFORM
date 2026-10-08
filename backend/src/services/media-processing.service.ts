@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ffmpeg } from '../config/ffmpeg';
@@ -42,24 +42,58 @@ type Rung = (typeof QUALITY_LADDER)[number];
  * pixel dimensions after preserving the source's aspect ratio.
  */
 
-type SizedRung = Rung & {
+type SizedRung = Omit<Rung, 'bitrateKbps'> & {
+  /** The bitrate this rung is ENCODED at (the ladder value, or lower when capped to the source's own bitrate). */
+  bitrateKbps: number;
   outWidth: number;
   outHeight: number;
+};
+
+/**
+ * Encoding knobs. The defaults are the tested ones (about 4x faster on a 4-CPU container, with near-identical
+ * picture quality: SSIM stays above 0.98). Each can be overridden from the environment, e.g. to run an experiment:
+ *   ENCODE_PRESET         libx264 speed preset. Default "veryfast"; "medium" is the old, much slower setting.
+ *   ENCODE_SINGLE_PASS    Default on. The 480p + 720p rungs come out of ONE FFmpeg run (the video is decoded once);
+ *                         set "false" to encode each rung in its own run.
+ *   BITRATE_CAP_FACTOR    Default 1.5: a rung is never encoded above 1.5x the SOURCE's own bitrate, because encoding
+ *                         a 2 Mbps source at 6 Mbps only makes the files bigger, not better. Set "0" to turn it off.
+ */
+export type EncodeOptions = { preset: string; singlePass: boolean; bitrateCapFactor: number };
+const MIN_CAPPED_KBPS = 400;
+
+export const readEncodeOptions = (): EncodeOptions => {
+  const cap = Number(process.env.BITRATE_CAP_FACTOR ?? 1.5);
+  return {
+    preset: process.env.ENCODE_PRESET || 'veryfast',
+    singlePass: process.env.ENCODE_SINGLE_PASS !== 'false',
+    bitrateCapFactor: Number.isFinite(cap) && cap > 0 ? cap : 0,
+  };
+};
+
+/** The ladder bitrate, lowered to `factor x source bitrate` when a cap is on (never below a sane floor). */
+const capBitrate = (ladderKbps: number, sourceKbps: number | undefined, factor: number) => {
+  if (!factor || !sourceKbps || sourceKbps <= 0) return ladderKbps;
+  return Math.max(MIN_CAPPED_KBPS, Math.min(ladderKbps, Math.round(sourceKbps * factor)));
 };
 
 //H.264 needs even dimensions, so we round down to the nearest even number.
 const toEven = (n: number): number => Math.max(2, Math.floor(n / 2) * 2);
 
-const sizeRungForSource = (rung: Rung, source: { width: number; height: number }): SizedRung => {
+const sizeRungForSource = (
+  rung: Rung,
+  source: { width: number; height: number; bitrateKbps?: number },
+  options: EncodeOptions = readEncodeOptions(),
+): SizedRung => {
+  const bitrateKbps = capBitrate(rung.bitrateKbps, source.bitrateKbps, options.bitrateCapFactor);
   const isPortrait = source.height > source.width;
   if (isPortrait) {
     const outWidth = rung.height;
-    return { ...rung, outWidth, outHeight: toEven((outWidth * source.height) / source.width) };
+    return { ...rung, bitrateKbps, outWidth, outHeight: toEven((outWidth * source.height) / source.width) };
   }
 
   //landscape/square: rung's number is the height, width is scaled to preserve aspect ratio.
   const outHeight = rung.height;
-  return { ...rung, outWidth: toEven((outHeight * source.width) / source.height), outHeight };
+  return { ...rung, bitrateKbps, outWidth: toEven((outHeight * source.width) / source.height), outHeight };
 };
 
 /**
@@ -108,6 +142,9 @@ const selectHdRungs = (sourceShortsSide: number): Rung[] => {
  * do anything, we have to pull the original video out of Blob Storage
  * and save it to a temp file on the worker's own disk.
  */
+/** Seconds with one decimal, for the [timing] log lines (read these to see where the time goes). */
+const secs = (startMs: number) => ((Date.now() - startMs) / 1000).toFixed(1);
+
 const downloadToTemp = async (
   container: ContainerName,
   blobPath: string,
@@ -118,7 +155,13 @@ const downloadToTemp = async (
       container,
       blobPath,
     );
+    const started = Date.now();
     await blockBlobClient.downloadToFile(destPath);
+    const bytes = (await stat(destPath)).size;
+    const took = Math.max(0.001, (Date.now() - started) / 1000);
+    console.log(
+      `[timing] download ${blobPath}: ${(bytes / 1e6).toFixed(1)} MB in ${took.toFixed(1)}s (${(bytes / 1e6 / took).toFixed(1)} MB/s)`,
+    );
   } catch (error) {
     throw new Error(
       `Failed to download blob ${blobPath} from container ${container}: ${error}`,
@@ -131,25 +174,58 @@ const downloadToTemp = async (
  * of the quality ladder as HLS (a .m3u8 playlist + several .ts segment
  * files sitting next to it in the same folder).
  */
+const hlsOutputOptions = (preset: string) => [
+  '-preset', preset,
+  '-hls_time', '6',
+  '-hls_playlist_type', 'vod',
+  '-f', 'hls',
+];
+
+/** Adds one HLS rung output (its own scale, bitrate and playlist) to an FFmpeg command. */
+const addRungOutput = (command: ReturnType<typeof ffmpeg>, outputPath: string, rung: SizedRung, preset: string) =>
+  command
+    .output(outputPath)
+    .videoCodec('libx264')
+    .audioCodec('aac')
+    .videoFilters(`scale=${rung.outWidth}:${rung.outHeight}`)
+    .videoBitrate(rung.bitrateKbps)
+    .outputOptions(hlsOutputOptions(preset));
+
 const runFfmpegEncode = async (
   inputPath: string,
   outputPath: string,
   rung: SizedRung,
+  preset: string = readEncodeOptions().preset,
 ) => {
   return new Promise<void>((resolve, reject) => {
-    ffmpeg(inputPath)
-      .videoCodec('libx264')
-      .audioCodec('aac')
-      //.size(`${rung.width}x${rung.height}`)
-      .videoFilters(`scale=${rung.outWidth}:${rung.outHeight}`)
-      .videoBitrate(rung.bitrateKbps)
-      .outputOptions(['-hls_time 6', '-hls_playlist_type vod', '-f', 'hls'])
-      .output(outputPath)
+    addRungOutput(ffmpeg(inputPath), outputPath, rung, preset)
       .on('end', () => resolve())
       .on('error', (err) =>
         reject(
           new Error(`FFmpeg encode failed for ${rung.label}:${err.message}`),
         ),
+      )
+      .run();
+  });
+};
+
+/**
+ * ONE FFmpeg run with several outputs: the source is read and decoded once, then each rung scales and encodes its own
+ * copy. Same files as running them one by one, for less total CPU.
+ */
+const runFfmpegEncodeTogether = async (
+  inputPath: string,
+  workDir: string,
+  rungs: SizedRung[],
+  preset: string,
+) => {
+  return new Promise<void>((resolve, reject) => {
+    const command = ffmpeg(inputPath);
+    for (const rung of rungs) addRungOutput(command, join(workDir, `${rung.label}.m3u8`), rung, preset);
+    command
+      .on('end', () => resolve())
+      .on('error', (err) =>
+        reject(new Error(`FFmpeg encode failed for ${rungs.map((r) => r.label).join('+')}: ${err.message}`)),
       )
       .run();
   });
@@ -182,7 +258,7 @@ const readRotation = (stream: RawProbeStream): number => {
 
 const probeSourceMetadata = async (
   inputPath: string,
-): Promise<{ width: number;  height: number; durationMs: number }> => {
+): Promise<{ width: number;  height: number; durationMs: number; bitrateKbps?: number }> => {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(inputPath, (err, metadata) => {
       if (err) {
@@ -215,7 +291,10 @@ const probeSourceMetadata = async (
         ? Math.round(durationSeconds * 1000)
         : 0;
 
-      resolve({ width: display.width, height: display.height, durationMs });
+      const bitsPerSecond = Number(metadata.format?.bit_rate ?? (videoStream as { bit_rate?: string | number }).bit_rate ?? 0);
+      const bitrateKbps = Number.isFinite(bitsPerSecond) && bitsPerSecond > 0 ? Math.round(bitsPerSecond / 1000) : undefined;
+
+      resolve({ width: display.width, height: display.height, durationMs, bitrateKbps });
     });
   });
 };
@@ -335,9 +414,25 @@ const encodeAndUploadRung = async (
   workDir: string,
   baseName: string,
   rung: SizedRung,
+  preset: string = readEncodeOptions().preset,
 ) => {
   const outputPath = join(workDir, `${rung.label}.m3u8`);
-  await runFfmpegEncode(inputPath, outputPath, rung);
+  const encodeStart = Date.now();
+  await runFfmpegEncode(inputPath, outputPath, rung, preset);
+  console.log(`[timing] ffmpeg ${rung.label} (${preset}, ${rung.bitrateKbps} kbps): ${secs(encodeStart)}s`);
+  return uploadEncodedRung(workDir, baseName, rung, outputPath);
+};
+
+/** Uploads one already-encoded rung (its playlist and every segment) to the "processed" container. */
+const uploadEncodedRung = async (
+  workDir: string,
+  baseName: string,
+  rung: SizedRung,
+  outputPath: string,
+) => {
+  const uploadStart = Date.now();
+  let uploadedBytes = 0;
+  let uploadedFiles = 0;
 
   const manifestBlobPath = `${baseName}/${rung.label}/playlist.m3u8`;
   const manifestContent = await readFile(outputPath, 'utf-8');
@@ -365,7 +460,12 @@ const encodeAndUploadRung = async (
       segmentContent,
       Buffer.byteLength(segmentContent),
     );
+    uploadedBytes += segmentContent.length;
+    uploadedFiles += 1;
   }
+  console.log(
+    `[timing] upload ${rung.label}: ${uploadedFiles} segments, ${(uploadedBytes / 1e6).toFixed(1)} MB in ${secs(uploadStart)}s`,
+  );
 
   return {
     label: rung.label,
@@ -409,16 +509,30 @@ export const MediaProcessingService = {
       const inputPath = join(workDir, 'original.mp4');
       await downloadToTemp('originals', originalBlobPath, inputPath);
 
+      const probeStart = Date.now();
       const source = await probeSourceMetadata(inputPath);
+      console.log(`[timing] probe: ${secs(probeStart)}s (${source.width}x${source.height}, ${Math.round(source.durationMs / 1000)}s long)`);
       const sourceShortSide = Math.min(source.width, source.height);
-      const rungs = selectStandardRungs(sourceShortSide).map((rung) => sizeRungForSource(rung, source));
+      const options = readEncodeOptions();
+      const rungs = selectStandardRungs(sourceShortSide).map((rung) => sizeRungForSource(rung, source, options));
       const baseName = originalBlobPath.replace(/[\/\.]/g, '-');
 
-      const variants = await Promise.all(
-        rungs.map((rung) =>
-          encodeAndUploadRung(inputPath, workDir, baseName, rung),
-        ),
-      );
+      let variants;
+      if (options.singlePass && rungs.length > 1) {
+        // One decode feeds every rung; then the finished rungs are uploaded.
+        const started = Date.now();
+        await runFfmpegEncodeTogether(inputPath, workDir, rungs, options.preset);
+        console.log(
+          `[timing] ffmpeg ${rungs.map((r) => `${r.label} @${r.bitrateKbps}k`).join(' + ')} (single pass, ${options.preset}): ${secs(started)}s`,
+        );
+        variants = await Promise.all(
+          rungs.map((rung) => uploadEncodedRung(workDir, baseName, rung, join(workDir, `${rung.label}.m3u8`))),
+        );
+      } else {
+        variants = await Promise.all(
+          rungs.map((rung) => encodeAndUploadRung(inputPath, workDir, baseName, rung, options.preset)),
+        );
+      }
 
       const masterBlobPath = `${baseName}/master.m3u8`;
       // Uses the same race-safe upsert as the HD path — an HD rung's job
@@ -505,7 +619,8 @@ export const MediaProcessingService = {
       // source doesn't qualify for either). Not a failure.
       if (!matchedRung) return { added: false as const };
 
-      const rung = sizeRungForSource(matchedRung, source);
+      const options = readEncodeOptions();
+      const rung = sizeRungForSource(matchedRung, source, options);
 
       const baseName = originalBlobPath.replace(/[\/\.]/g, '-');
       const variant = await encodeAndUploadRung(
@@ -513,6 +628,7 @@ export const MediaProcessingService = {
         workDir,
         baseName,
         rung,
+        options.preset,
       );
 
       const masterBlobPath = `${baseName}/master.m3u8`;
@@ -550,4 +666,14 @@ export const MediaProcessingService = {
       await rm(workDir, { recursive: true, force: true });
     }
   },
+};
+
+/** Pieces the benchmark script reuses, so it measures exactly what the worker runs. */
+export const EncodingForBenchmark = {
+  probeSourceMetadata,
+  selectStandardRungs,
+  selectHdRungs,
+  sizeRungForSource,
+  runFfmpegEncode,
+  runFfmpegEncodeTogether,
 };

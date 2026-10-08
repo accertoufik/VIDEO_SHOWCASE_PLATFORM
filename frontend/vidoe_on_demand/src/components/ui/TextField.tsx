@@ -182,13 +182,12 @@ export const TextField = ({
         ) : null}
       </View>
       {error ? (
-        <AppText
-          variant='bodySmall'
-          color='error'
-          accessibilityLiveRegion='polite'
-        >
-          {error}
-        </AppText>
+        <View style={styles.errorRow} accessibilityLiveRegion='polite'>
+          <Ionicons name='alert-circle' size={16} color={colors.status.error} />
+          <AppText variant='bodySmall' color='error' style={styles.errorText}>
+            {error}
+          </AppText>
+        </View>
       ) : helper ? (
         <AppText
           variant='bodySmall'
@@ -205,6 +204,8 @@ export const TextField = ({
 const styles = StyleSheet.create({
   text: inputTypography,
   wrap: { gap: spacing.xs },
+  errorRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  errorText: { flex: 1 },
   field: {
     flexDirection: 'row',
     alignItems: 'center',

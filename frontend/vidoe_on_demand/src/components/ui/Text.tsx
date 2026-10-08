@@ -18,5 +18,10 @@ type Props = TextProps & { variant?: TypographyVariant; color?: TextColor };
 
 // Every piece of text in the app goes through this, so type and color stay token-driven.
 export const AppText = ({ variant = "body", color = "primary", style, ...rest }: Props) => (
-  <Text {...rest} style={[typography[variant], { color: textColors[color] }, style]} />
+  <Text
+    // Large-text users must keep working text scaling; the cap only stops the biggest sizes breaking layouts.
+    maxFontSizeMultiplier={variant === 'display' || variant === 'h1' || variant === 'brand' ? 1.2 : 1.5}
+    {...rest}
+    style={[typography[variant], { color: textColors[color] }, style]}
+  />
 );
