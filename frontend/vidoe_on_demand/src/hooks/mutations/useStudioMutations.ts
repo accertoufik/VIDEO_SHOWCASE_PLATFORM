@@ -4,11 +4,14 @@ import {
   type InfiniteData,
 } from '@tanstack/react-query';
 import { deleteVideo, updateVideo } from '@/api/creatorVideos';
+import { confirmThumbnail, requestThumbnailUpload } from '@/api/uploads';
 import { removeStudioComment } from '@/api/studio';
 import { MY_VIDEOS_KEY } from '@/hooks/queries/useMyVideos';
 import { STUDIO_COMMENTS_KEY, STUDIO_KEY } from '@/hooks/queries/useStudio';
 import { useApi } from '@/lib/auth/useApi';
+import { uploadToBlob } from '@/lib/upload/blobUpload';
 import { queryKeys } from '@/lib/query/queryKeys';
+import type { PickedImage } from '@/lib/media/pickImage';
 import type { StudioCommentsPage } from '@/types/studio';
 
 type CommentsData = InfiniteData<StudioCommentsPage>;
@@ -62,6 +65,29 @@ export const useUpdateVideo = () => {
     onSuccess: (_d, { videoId }) => {
       void qc.invalidateQueries({ queryKey: MY_VIDEOS_KEY });
       void qc.invalidateQueries({ queryKey: queryKeys.video(videoId) });
+    },
+  });
+};
+
+/** Replaces a video's thumbnail with a picked image: signed upload link -> upload -> confirm. */
+export const useChangeThumbnail = () => {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ videoId, image }: { videoId: string; image: PickedImage }) => {
+      const ticket = await requestThumbnailUpload(api, videoId, `.${image.extension}`);
+      await uploadToBlob(ticket.uploadUrl, image.uri, { contentType: image.contentType });
+      await confirmThumbnail(api, videoId, ticket.blobName);
+    },
+    onSuccess: (_d, { videoId }) => {
+      void qc.invalidateQueries({ queryKey: MY_VIDEOS_KEY });
+      void qc.invalidateQueries({ queryKey: queryKeys.video(videoId) });
+      // Home, category and channel lists show the thumbnail too.
+      void qc.invalidateQueries({ queryKey: ['feed'] });
+      void qc.invalidateQueries({ queryKey: ['library'] });
+      void qc.invalidateQueries({ queryKey: ['shorts'] });
+      void qc.invalidateQueries({ queryKey: ['trending'] });
+      void qc.invalidateQueries({ queryKey: ['related'] });
     },
   });
 };

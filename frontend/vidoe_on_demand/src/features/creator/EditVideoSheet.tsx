@@ -19,11 +19,14 @@ import { TextField } from '@/components/ui/TextField';
 import { colors, radii, spacing } from '@/css';
 import { Chip } from '@/features/upload/Chip';
 import {
+  useChangeThumbnail,
   useDeleteVideo,
   useUpdateVideo,
 } from '@/hooks/mutations/useStudioMutations';
 import { useCategories } from '@/hooks/queries/useCategories';
+import { Thumbnail } from '@/components/video/Thumbnail';
 import { describeError } from '@/lib/errors/describeError';
+import { pickImage } from '@/lib/media/pickImage';
 import { toast } from '@/lib/toast';
 import type { MyVideo } from '@/types/creatorVideo';
 
@@ -38,13 +41,14 @@ export const EditVideoSheet = ({ video, onClose }: Props) => {
   const categories = useCategories();
   const update = useUpdateVideo();
   const remove = useDeleteVideo();
+  const changeThumbnail = useChangeThumbnail();
 
   const [title, setTitle] = useState(video.title);
   const [description, setDescription] = useState(video.description ?? '');
   const [categoryId, setCategoryId] = useState<string | null>(video.categoryId);
   const [error, setError] = useState<string | null>(null);
 
-  const busy = update.isPending || remove.isPending;
+  const busy = update.isPending || remove.isPending || changeThumbnail.isPending;
   const trimmedTitle = title.trim();
 
   // Only send what changed.
@@ -59,6 +63,23 @@ export const EditVideoSheet = ({ video, onClose }: Props) => {
 
   const fail = (e: unknown) =>
     setError(isApiError(e) ? e.message : describeError(e).message);
+
+  const pickThumbnail = async () => {
+    setError(null);
+    try {
+      const image = await pickImage('thumbnail');
+      if (!image) return;
+      changeThumbnail.mutate(
+        { videoId: video.id, image },
+        {
+          onSuccess: () => toast.success('Thumbnail updated'),
+          onError: fail,
+        },
+      );
+    } catch {
+      toast.error("Couldn't open your library. Check the app's photo permission in Settings.");
+    }
+  };
 
   const save = () => {
     setError(null);
@@ -128,6 +149,19 @@ export const EditVideoSheet = ({ video, onClose }: Props) => {
               keyboardShouldPersistTaps='handled'
               showsVerticalScrollIndicator={false}
             >
+              <View style={styles.group}>
+                <AppText variant='label'>Thumbnail</AppText>
+                <Thumbnail uri={video.thumbnailUrl} durationMs={video.durationSec != null ? video.durationSec * 1000 : null} radius='md' />
+                <GlassButton
+                  label='Change thumbnail'
+                  icon='image-outline'
+                  variant='glass'
+                  fullWidth
+                  loading={changeThumbnail.isPending}
+                  disabled={busy}
+                  onPress={pickThumbnail}
+                />
+              </View>
               <TextField
                 label='Title'
                 value={title}

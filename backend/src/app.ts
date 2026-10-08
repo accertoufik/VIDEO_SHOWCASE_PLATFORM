@@ -65,7 +65,7 @@ app.use('/api', (req, res, next) => {
     if (res.statusCode >= 400) return;
     const p = req.path;
     if (/^\/(profile|creator-profile)/.test(p) || (req.method === 'DELETE' && p === '/me')) void invalidate('creator:profile:*');
-    if (/^\/videos/.test(p) && (req.method !== 'POST' || /\/(publish|complete)$/.test(p))) void invalidate('related:*', 'trending:*');
+    if (/^\/videos/.test(p) && (req.method !== 'POST' || /\/(publish|complete|thumbnail\/confirm)$/.test(p))) void invalidate('related:*', 'trending:*');
   });
   next();
 });
