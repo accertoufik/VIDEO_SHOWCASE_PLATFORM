@@ -64,7 +64,12 @@ export const useVideoUpload = () => {
     );
   };
 
+  const running = useRef(false);
+
   const run = async (input: Input): Promise<UploadResult> => {
+    // A second tap (or call) while an upload is starting must not create a second video.
+    if (running.current) return { ok: false, error: 'An upload is already in progress.', cancelled: true };
+    running.current = true;
     const controller = new AbortController();
     abort.current = controller;
     const signal = controller.signal;
@@ -156,6 +161,7 @@ export const useVideoUpload = () => {
         cancelled: false,
       };
     } finally {
+      running.current = false;
       abort.current = null;
       setPhase('idle');
     }

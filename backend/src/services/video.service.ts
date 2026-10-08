@@ -182,8 +182,15 @@ export const VideoService = {
     try {
       const { creatorProfile } = await requireCreatorProfile(clerkUserId);
 
+      // An upload still in progress shows up; one that never finished (app closed, cancelled, a retry that made a
+      // second video) is abandoned after 10 minutes and no longer clutters the Content tab.
+      const abandonedBefore = new Date(Date.now() - 10 * 60 * 1000);
       const rows = await prisma.video.findMany({
-        where: { creatorId: creatorProfile.id, deletedAt: null },
+        where: {
+          creatorId: creatorProfile.id,
+          deletedAt: null,
+          NOT: { status: 'UPLOADING', createdAt: { lt: abandonedBefore } },
+        },
         orderBy: { createdAt: 'desc' },
         include: VIDEO_CARD_INCLUDE,
       });
