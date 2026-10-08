@@ -1,5 +1,5 @@
 import { useDockInset } from '@/components/navigation/useDockInset';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo } from 'react';
 import {
   ActivityIndicator,
@@ -8,7 +8,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { EmptyState } from '@/components/ui/EmptyState';
+import { EmptyHero } from '@/components/ui/EmptyHero';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { VideoCard, VideoCardSkeleton } from '@/components/video';
@@ -19,6 +19,7 @@ import type { VideoCardData } from '@/types/video';
 import { uniqueById } from '@/utils/collection';
 
 const CategoryScreen = () => {
+  const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const dockInset = useDockInset(); // keeps the last items clear of the floating dock
   const categories = useCategories();
@@ -41,10 +42,11 @@ const CategoryScreen = () => {
   ) : feed.isError ? (
     <ErrorState error={feed.error} onRetry={() => feed.refetch()} />
   ) : (
-    <EmptyState
-      icon='film-outline'
-      title='Nothing here yet'
-      message='No public videos in this category.'
+    <EmptyHero
+      icon='albums-outline'
+      title='No videos in this category yet'
+      message='Creators haven’t posted here yet. Check back soon or explore another category.'
+      action={{ label: 'Browse all videos', icon: 'compass-outline', onPress: () => router.replace('/') }}
     />
   );
 

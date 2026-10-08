@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useDockInset } from '@/components/navigation/useDockInset';
-import { EmptyState } from '@/components/ui/EmptyState';
+import { EmptyHero } from '@/components/ui/EmptyHero';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { SectionHeader } from '@/features/home/SectionHeader';
 import { VideoCard, VideoCardSkeleton } from '@/components/video';
@@ -109,14 +109,15 @@ const HomeScreen = () => {
   ) : feed.isError ? (
     <ErrorState error={feed.error} onRetry={() => feed.refetch()} />
   ) : (
-    <EmptyState
-      icon='film-outline'
-      title={categoryId ? 'Nothing here yet' : 'No videos yet'}
+    <EmptyHero
+      icon={categoryId ? 'albums-outline' : 'film-outline'}
+      title={categoryId ? 'No videos in this category yet' : 'No videos yet'}
       message={
         categoryId
-          ? 'No public videos in this category. Try another.'
+          ? 'Creators haven’t posted here yet. Pick another category to keep exploring.'
           : 'Public videos will appear here.'
       }
+      action={categoryId ? { label: 'Show all videos', icon: 'apps-outline', onPress: () => setCategoryId(undefined) } : undefined}
     />
   );
 

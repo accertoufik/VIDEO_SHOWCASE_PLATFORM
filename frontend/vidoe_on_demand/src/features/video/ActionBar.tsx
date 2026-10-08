@@ -30,11 +30,11 @@ export const ActionBar = ({ video, viewer, onOpenComments }: Props) => {
   const saved = Boolean(viewer?.isSaved);
 
   const onLike = () => {
-    if (!ensureSignedIn() || like.isPending) return;
+    if (!ensureSignedIn()) return;
     like.mutate(!liked);
   };
   const onSave = () => {
-    if (!ensureSignedIn() || save.isPending) return;
+    if (!ensureSignedIn()) return;
     save.mutate(!saved);
   };
 

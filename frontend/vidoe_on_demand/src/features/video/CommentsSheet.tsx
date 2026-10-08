@@ -14,10 +14,11 @@ import type { Comment } from '@/types/social';
 import { useAuth } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -62,6 +63,18 @@ export const CommentsSheet = ({ videoId, visible, count, onClose, belowPlayer = 
   const [text, setText] = useState('');
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
+  // Android draws edge-to-edge inside this Modal, so the window doesn't resize for the keyboard:
+  // lift the sheet by the keyboard's height ourselves so the input stays visible while typing.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const show = Keyboard.addListener('keyboardDidShow', (e) => setKeyboardHeight(e.endCoordinates.height));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   // A synchronous guard: state (isPending, text) only updates on the next render, so a touch-down followed by the
   // press event a moment later could otherwise both get through and post the comment twice.
@@ -111,7 +124,7 @@ export const CommentsSheet = ({ videoId, visible, count, onClose, belowPlayer = 
         />
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={[styles.sheet, wideStyle]}
+          style={[styles.sheet, wideStyle, keyboardHeight ? { marginBottom: keyboardHeight } : null]}
         >
           <View style={styles.header}>
             <AppText variant='h3' accessibilityRole='header'>

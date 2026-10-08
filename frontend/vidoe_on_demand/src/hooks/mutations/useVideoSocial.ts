@@ -24,10 +24,13 @@ const useOptimisticVideoToggle = (
   videoId: string,
   request: (next: boolean) => Promise<unknown>,
   apply: (data: VideoQueryData, next: boolean) => VideoQueryData,
+  key: string,
 ) => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: request,
+    // Taps on the same video run one after another, so a quick like → unlike can't arrive out of order.
+    scope: { id: `video-social-${videoId}-${key}` },
     onMutate: async (next: boolean) => {
       haptics.tap();
       await qc.cancelQueries({ queryKey: queryKeys.video(videoId) });
@@ -42,6 +45,8 @@ const useOptimisticVideoToggle = (
         qc.setQueryData(queryKeys.video(videoId), context.previous);
     },
     onSettled: () => {
+      // While more taps are queued, a refetch would overwrite their optimistic state with stale server data.
+      if (qc.isMutating({ predicate: (m) => m.options.scope?.id === `video-social-${videoId}-${key}` }) > 1) return;
       qc.invalidateQueries({ queryKey: queryKeys.video(videoId) });
       // Liked / saved / following lists must reflect the change the next time they're opened.
       qc.invalidateQueries({ queryKey: ['library'] });
@@ -61,6 +66,7 @@ export const useToggleLike = (videoId: string) => {
       },
       viewer: { ...data.viewer!, isLiked: next },
     }),
+    'like',
   );
 };
 
@@ -73,6 +79,7 @@ export const useToggleSave = (videoId: string) => {
       video: data.video,
       viewer: { ...data.viewer!, isSaved: next },
     }),
+    'save',
   );
 };
 
@@ -95,6 +102,7 @@ export const useToggleFollow = (videoId: string, creatorId: string) => {
       },
       viewer: { ...data.viewer!, isFollowingCreator: next },
     }),
+    'follow',
   );
 };
 

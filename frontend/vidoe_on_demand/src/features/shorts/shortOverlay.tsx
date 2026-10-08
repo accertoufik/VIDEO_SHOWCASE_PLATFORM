@@ -51,7 +51,7 @@ const Actions = ({ detail, viewer, onOpenComments }: ActionsProps) => {
         label={liked ? 'Unlike' : 'Like'}
         count={formatCount(detail.likeCount)}
         onPress={() =>
-          ensureSignedIn() && !like.isPending && like.mutate(!liked)
+          ensureSignedIn() && like.mutate(!liked)
         }
       />
       <ShortAction
@@ -72,7 +72,7 @@ const Actions = ({ detail, viewer, onOpenComments }: ActionsProps) => {
         active={saved}
         label={saved ? 'Unsave' : 'Save'}
         onPress={() =>
-          ensureSignedIn() && !save.isPending && save.mutate(!saved)
+          ensureSignedIn() && save.mutate(!saved)
         }
       />
     </View>

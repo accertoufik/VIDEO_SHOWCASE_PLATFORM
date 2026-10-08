@@ -6,7 +6,7 @@ import {
   View,
 } from 'react-native';
 import { useDockInset } from '@/components/navigation/useDockInset';
-import { EmptyState } from '@/components/ui/EmptyState';
+import { EmptyHero } from '@/components/ui/EmptyHero';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { AppText } from '@/components/ui/Text';
@@ -48,10 +48,10 @@ const RowSkeletons = () => (
 );
 
 const NoResults = ({ q }: { q: string }) => (
-  <EmptyState
+  <EmptyHero
     icon='search-outline'
-    title='No results'
-    message={`Nothing matched “${q}”. Try different words.`}
+    title={`No results for “${q}”`}
+    message='Check the spelling, try a shorter word, or search by topic or creator name.'
   />
 );
 
