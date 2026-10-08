@@ -326,7 +326,8 @@ videosRouter.get(
 );
 
 const thumbnailUploadSchema = z.object({
-  fileExtension: z.string().regex(/^\.\w+$/, 'Invalid file extension'),
+  // The app sends the extension with or without the leading dot.
+  fileExtension: z.string().regex(/^\.?\w+$/, 'Invalid file extension'),
 });
 
 /** POST /api/videos/:videoId/thumbnail

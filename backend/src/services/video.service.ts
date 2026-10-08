@@ -350,7 +350,7 @@ export const VideoService = {
         throw new ApiError(404, 'Video not found');
       }
 
-      const blobName = `thumbnails/${video.id}/${randomUUID()}.${fileExtension}`;
+      const blobName = `thumbnails/${video.id}/${randomUUID()}.${fileExtension.replace(/^\./, '')}`;
       const uploadUrl = await AzureStorageService.generateUploadSasUrl(
         'thumbnails',
         blobName,
