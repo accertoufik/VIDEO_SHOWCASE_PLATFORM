@@ -66,6 +66,18 @@ export const SocialAuthButtons = ({
         return;
       }
 
+      // Android reports "dismiss" the moment the browser closes, which can be just BEFORE the redirect link is
+      // delivered to the app. Give the link a moment to arrive (also check the link that last opened the app).
+      if (authSessionResult?.type !== 'success' && !redirectedUrl) {
+        for (let i = 0; i < 15 && !redirectedUrl; i++) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        if (!redirectedUrl) {
+          const last = (await Linking.getInitialURL().catch(() => null)) ?? Linking.getLinkingURL?.() ?? null;
+          if (last?.includes('rotating_token_nonce')) redirectedUrl = last;
+        }
+      }
+
       // The hook missed the redirect but we caught it: finish the sign-in with the token from that link.
       if (redirectedUrl && authSessionResult?.type !== 'success' && signIn) {
         const nonce = new URL(redirectedUrl).searchParams.get('rotating_token_nonce') ?? '';
