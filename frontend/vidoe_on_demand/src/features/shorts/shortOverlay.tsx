@@ -63,7 +63,6 @@ const Actions = ({ detail, viewer, onOpenComments }: ActionsProps) => {
       <ShortAction
         icon='arrow-redo-outline'
         label='Share'
-        count={formatCount(detail.shareCount)}
         onPress={share}
       />
       <ShortAction

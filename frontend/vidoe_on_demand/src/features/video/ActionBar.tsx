@@ -114,10 +114,9 @@ export const ActionBar = ({ video, viewer, onOpenComments }: Props) => {
         onPress={onSave}
       />
       <GlassButton
-        label={formatCount(video.shareCount)}
+        label='Share'
         icon='share-social-outline'
         size='sm'
-        accessibilityLabel={`Share, shared ${video.shareCount} times`}
         onPress={share}
       />
       {video.canDownload ? (

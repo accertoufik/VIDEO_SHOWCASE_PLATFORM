@@ -18,7 +18,15 @@
       "predictiveBackGestureEnabled": false,
       "backgroundColor": "#12121A",
       "package": "com.toufik.tamasa",
-      "versionCode": 1
+      "versionCode": 1,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [{ "scheme": "https", "host": "www.toufiktamasa.tech", "pathPrefix": "/video" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "output": "static",

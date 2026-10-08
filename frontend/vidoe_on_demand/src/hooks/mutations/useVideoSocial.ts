@@ -1,6 +1,5 @@
 import { haptics } from '@/lib/haptics';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import * as Linking from 'expo-linking';
 import { Share } from 'react-native';
 import {
   followCreator,
@@ -106,6 +105,8 @@ export const useToggleFollow = (videoId: string, creatorId: string) => {
   );
 };
 
+const SHARE_BASE_URL = 'https://www.toufiktamasa.tech';
+
 /** Opens the system share sheet; if the user actually shared, bump the backend counter (no sign-in needed). */
 export const useShare = (video: VideoDetail) => {
   const api = useApi();
@@ -117,8 +118,9 @@ export const useShare = (video: VideoDetail) => {
 
   return async () => {
     try {
-      // The link uses the app's URL scheme (see app.json "scheme"). There is no public web domain yet.
-      const url = Linking.createURL(`/video/${video.id}`);
+      // A normal https link, so chat apps make it tappable. The page opens the app if it is installed, otherwise
+      // offers the download (site: ~/tamasa-download, 404.html handles /video/<id>).
+      const url = `${SHARE_BASE_URL}/video/${video.id}`;
       const result = await Share.share({ message: `${video.title}\n${url}` });
       if (result.action === Share.sharedAction) bump.mutate();
     } catch {
