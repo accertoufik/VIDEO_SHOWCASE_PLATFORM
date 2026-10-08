@@ -12,68 +12,59 @@ import { videoA11yLabel } from '@/lib/a11y/videoLabel';
 
 type Props = {
   video: VideoCardData;
-  /** Hide the creator row (e.g. on the creator's own page, where it would just open the same page). */
+  /** On the creator's own page the avatar and name would just reopen the same page, so they stay plain. */
   hideCreator?: boolean;
 };
 
-// Long-form feed card, in two separate tap areas: thumbnail + title open the video; the creator row opens the channel.
+// Long-form feed card. Thumbnail and title open the video; the avatar and the creator's name open the channel.
 export const VideoCard = memo(({ video, hideCreator = false }: Props) => {
   const router = useRouter();
-  const meta = [`${formatCount(video.viewCount)} views`, formatRelativeTime(video.publishedAt)]
+  const username = video.creator.username;
+  const canOpenChannel = Boolean(username) && !hideCreator;
+  const openChannel = () =>
+    username && router.push({ pathname: '/creator/[username]', params: { username } });
+  const openVideo = () => router.push({ pathname: '/video/[id]', params: { id: video.id } });
+  const stats = [`${formatCount(video.viewCount)} views`, formatRelativeTime(video.publishedAt)]
     .filter(Boolean)
     .join(' · ');
-  const username = video.creator.username;
 
   return (
     <View>
-      <PressableScale
-        accessibilityRole='button'
-        accessibilityLabel={videoA11yLabel(video)}
-        onPress={() =>
-          router.push({ pathname: '/video/[id]', params: { id: video.id } })
-        }
-      >
+      <PressableScale accessibilityRole='button' accessibilityLabel={videoA11yLabel(video)} onPress={openVideo}>
         <Thumbnail uri={video.thumbnailUrl} durationMs={video.durationMs} />
-        <View style={styles.info}>
+      </PressableScale>
+      <View style={styles.meta}>
+        <PressableScale
+          disabled={!canOpenChannel}
+          accessibilityRole='button'
+          accessibilityLabel={`Open ${video.creator.name}'s channel`}
+          onPress={openChannel}
+        >
+          <Avatar uri={video.creator.avatarUrl} name={video.creator.name} size='sm' />
+        </PressableScale>
+        <PressableScale style={styles.text} accessibilityRole='button' accessibilityLabel={videoA11yLabel(video)} onPress={openVideo}>
           <AppText variant='title' numberOfLines={2}>
             {video.title}
           </AppText>
           <AppText variant='bodySmall' color='secondary' numberOfLines={1}>
-            {meta}
-          </AppText>
-        </View>
-      </PressableScale>
-      {hideCreator ? null : (
-        <PressableScale
-          disabled={!username}
-          accessibilityRole='button'
-          accessibilityLabel={`Open ${video.creator.name}'s channel`}
-          onPress={() =>
-            username &&
-            router.push({ pathname: '/creator/[username]', params: { username } })
-          }
-          style={styles.creator}
-        >
-          <Avatar uri={video.creator.avatarUrl} name={video.creator.name} size='sm' />
-          <AppText variant='bodySmall' color='secondary' numberOfLines={1} style={styles.creatorName}>
-            {video.creator.name}
+            <AppText
+              variant='bodySmall'
+              color='secondary'
+              onPress={canOpenChannel ? openChannel : undefined}
+              accessible={false}
+            >
+              {video.creator.name}
+            </AppText>
+            {` · ${stats}`}
           </AppText>
         </PressableScale>
-      )}
+      </View>
     </View>
   );
 });
 VideoCard.displayName = 'VideoCard';
 
 const styles = StyleSheet.create({
-  info: { gap: spacing.xs, paddingTop: spacing.md },
-  creator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: spacing.sm,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xs,
-  },
-  creatorName: { flexShrink: 1 },
+  meta: { flexDirection: 'row', gap: spacing.md, paddingTop: spacing.md },
+  text: { flex: 1, gap: spacing.xs },
 });
