@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Tamasa",
+    "name": "Tamasha",
     "slug": "vidoe_on_demand",
     "version": "1.0.0",
     "orientation": "default",
@@ -18,7 +18,9 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "backgroundColor": "#12121A"
+      "backgroundColor": "#12121A",
+      "package": "com.toufik.tamasha",
+      "versionCode": 1
     },
     "web": {
       "output": "static",
