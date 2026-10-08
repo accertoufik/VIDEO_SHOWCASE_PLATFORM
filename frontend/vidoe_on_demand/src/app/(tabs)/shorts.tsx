@@ -18,6 +18,8 @@ import { colors, layout, spacing } from '@/css';
 import { ShortItem } from '@/features/shorts/ShortItem';
 import { useShorts } from '@/hooks/queries/useShorts';
 import { useAppActive } from '@/hooks/useAppActive';
+import { useReduceMotion } from '@/lib/a11y/useReduceMotion';
+import { useScreenReader } from '@/lib/a11y/useScreenReader';
 import type { VideoCardData } from '@/types/video';
 import { uniqueById } from '@/utils/collection';
 // Once every page is loaded the list repeats itself this many times, so swiping up never reaches an end: after the
@@ -36,6 +38,14 @@ const ShortsScreen = () => {
   const [height, setHeight] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [muted, setMuted] = useState(false);
+  const listRef = useRef<FlatList<Slot>>(null);
+  const screenReaderOn = useScreenReader();
+  const reduceMotion = useReduceMotion();
+  const goTo = (delta: number) =>
+    listRef.current?.scrollToIndex({
+      index: Math.max(0, Math.min(slotsLengthRef.current - 1, activeIndex + delta)),
+      animated: !reduceMotion,
+    });
 
   const videos = useMemo(
     () => uniqueById(query.data?.pages.flatMap((page) => page.videos) ?? []),
@@ -61,6 +71,8 @@ const ShortsScreen = () => {
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
 
   const screenActive = focused && appActive;
+  const slotsLengthRef = useRef(0);
+  slotsLengthRef.current = slots.length;
 
   let body;
   if (query.isPending) {
@@ -88,6 +100,7 @@ const ShortsScreen = () => {
   } else if (height > 0) {
     body = (
       <FlatList<Slot>
+        ref={listRef}
         data={slots}
         keyExtractor={(slot) => slot.key}
         renderItem={({ item, index }) => (
@@ -151,6 +164,28 @@ const ShortsScreen = () => {
           Shorts
         </AppText>
         <View style={styles.topActions}>
+          {screenReaderOn ? (
+            <>
+              <Pressable
+                onPress={() => goTo(-1)}
+                hitSlop={8}
+                style={styles.topButton}
+                accessibilityRole='button'
+                accessibilityLabel='Previous short'
+              >
+                <Ionicons name='chevron-up' size={22} color={colors.text.primary} />
+              </Pressable>
+              <Pressable
+                onPress={() => goTo(1)}
+                hitSlop={8}
+                style={styles.topButton}
+                accessibilityRole='button'
+                accessibilityLabel='Next short'
+              >
+                <Ionicons name='chevron-down' size={22} color={colors.text.primary} />
+              </Pressable>
+            </>
+          ) : null}
           <Pressable
             onPress={() => router.push('/search')}
             hitSlop={8}

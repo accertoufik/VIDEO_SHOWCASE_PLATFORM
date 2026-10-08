@@ -74,7 +74,7 @@ export const BottomSheet = ({
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <View style={styles.root}>
+      <View style={styles.root} accessibilityViewIsModal>
         <Animated.View
           style={[StyleSheet.absoluteFill, styles.backdrop, backdropStyle]}
         >

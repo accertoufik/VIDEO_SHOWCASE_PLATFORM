@@ -82,6 +82,8 @@ export const VideoDetails = ({ video, viewer, loading = false }: Props) => {
         {loading || viewer?.isOwner ? null : (
           <GlassButton
             label={following ? 'Following' : 'Follow'}
+            accessibilityLabel={following ? `Following ${video.creator.name}. Double tap to unfollow` : `Follow ${video.creator.name}`}
+            selected={following}
             variant={following ? 'glass' : 'primary'}
             size='sm'
             onPress={onFollow}

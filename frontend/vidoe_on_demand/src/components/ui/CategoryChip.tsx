@@ -1,5 +1,6 @@
 import { StyleSheet } from 'react-native';
 import { colors, layout, radii, spacing } from '@/css';
+import { hitSlopFor } from '@/lib/a11y/hitSlop';
 import { AppText } from './Text';
 import { PressableScale } from './PressableScale';
 
@@ -9,6 +10,8 @@ type Props = { label: string; selected?: boolean; onPress?: () => void };
 export const CategoryChip = ({ label, selected = false, onPress }: Props) => (
   <PressableScale
     onPress={onPress}
+    hitSlop={hitSlopFor(layout.minTouchTarget - 8)}
+    accessibilityRole='button'
     accessibilityLabel={label}
     accessibilityState={{ selected }}
     style={[styles.base, selected ? styles.selected : styles.idle]}

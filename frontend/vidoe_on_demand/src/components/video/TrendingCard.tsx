@@ -7,6 +7,7 @@ import { colors, radii, spacing } from '@/css';
 import type { VideoCardData } from '@/types/video';
 import { formatCount } from '@/utils/format';
 import { Thumbnail } from './Thumbnail';
+import { videoA11yLabel } from '@/lib/a11y/videoLabel';
 
 type Props = { video: VideoCardData; rank: number };
 
@@ -20,7 +21,7 @@ export const TrendingCard = memo(({ video, rank }: Props) => {
     <PressableScale
       style={{ width: cardWidth }}
       accessibilityRole='button'
-      accessibilityLabel={`Trending number ${rank}: ${video.title}, by ${video.creator.name}`}
+      accessibilityLabel={videoA11yLabel(video, `Trending number ${rank}`)}
       onPress={() =>
         router.push({ pathname: '/video/[id]', params: { id: video.id } })
       }

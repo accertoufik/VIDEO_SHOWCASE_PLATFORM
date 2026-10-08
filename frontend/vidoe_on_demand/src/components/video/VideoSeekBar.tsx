@@ -71,6 +71,15 @@ export const VideoSeekBar = ({
         {...pan.panHandlers}
         accessibilityRole='adjustable'
         accessibilityLabel='Seek bar'
+        accessibilityValue={{ text: `${formatDuration(currentTime * 1000)} of ${formatDuration(duration * 1000)}` }}
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+        onAccessibilityAction={(event) => {
+          // Swipe up / down with TalkBack or VoiceOver: jump 10 seconds.
+          const step = 10;
+          const to = event.nativeEvent.actionName === 'increment' ? currentTime + step : currentTime - step;
+          live.current.onSeek(Math.min(live.current.duration, Math.max(0, to)));
+          live.current.onScrub?.();
+        }}
       >
         <View style={styles.track}>
           <View style={[styles.fill, { width: `${ratio * 100}%` }]} />

@@ -8,6 +8,7 @@ import { colors, radii, spacing } from '@/css';
 import type { VideoCardData } from '@/types/video';
 import { formatCount, formatRelativeTime } from '@/utils/format';
 import { Thumbnail } from './Thumbnail';
+import { videoA11yLabel } from '@/lib/a11y/videoLabel';
 
 // Structural width of the thumbnail column; the text takes the rest.
 const THUMB_WIDTH = 150;
@@ -36,7 +37,7 @@ export const VideoRow = memo(
         <PressableScale
           style={styles.row}
           accessibilityRole='button'
-          accessibilityLabel={`${rank ? `Number ${rank}: ` : ''}${video.title}, by ${video.creator.name}`}
+          accessibilityLabel={videoA11yLabel(video, rank ? `Number ${rank}` : undefined)}
           onPress={() =>
             router.push({ pathname: '/video/[id]', params: { id: video.id } })
           }

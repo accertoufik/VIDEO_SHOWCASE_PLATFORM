@@ -197,6 +197,7 @@ const relatedQuerySchema = z.object({
 
 videosRouter.get(
   '/videos/:videoId/related',
+  optionalAuth,
   asyncHandler(async (req: AuthenticatedRequest, res) => {
     const videoId = parseVideoId(req.params.videoId);
     const parsedQuery = relatedQuerySchema.safeParse(req.query);
@@ -208,10 +209,20 @@ videosRouter.get(
       );
     }
     const { limit } = parsedQuery.data;
-    // Public, viewer-independent (no auth is passed), so it is shared through the cache.
-    const related = await cached(cacheKeys.related(videoId, limit), CACHE_TTL.related, () =>
-      FeedService.getRelatedVideos(videoId, limit),
-    );
+    // For a public video the list is the same for everyone, so it is shared through the cache.
+    let related: { videos: unknown[] };
+    try {
+      related = await cached(cacheKeys.related(videoId, limit), CACHE_TTL.related, () =>
+        FeedService.getRelatedVideos(videoId, limit),
+      );
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.statusCode !== 404) throw error;
+      // The video isn't public: only its owner may see it, so the owner gets a list (not cached, since it depends on who
+      // is asking) and everyone else gets an empty one instead of a "not found" in the middle of the watch page.
+      related = req.auth?.userId
+        ? await FeedService.getRelatedVideos(videoId, limit, req.auth.userId).catch(() => ({ videos: [] }))
+        : { videos: [] };
+    }
     // The service returns { videos: [...] }; send the array itself under both names the app accepts.
     sendSuccessResponse(res, { relatedVideos: related.videos, videos: related.videos });
   }));

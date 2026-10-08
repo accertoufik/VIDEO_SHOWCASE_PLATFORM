@@ -134,7 +134,7 @@ export const useVideoUpload = () => {
           if (error instanceof UploadCancelledError) throw error;
           // The video matters more than its cover: carry on, the worker generates one automatically.
           thumbnailFailed = true;
-          console.warn('[upload] thumbnail failed:', error);
+          if (__DEV__) console.warn('[upload] thumbnail failed:', error);
         }
       }
 

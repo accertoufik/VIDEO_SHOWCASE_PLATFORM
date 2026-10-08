@@ -8,6 +8,7 @@ import { spacing } from '@/css';
 import type { VideoCardData } from '@/types/video';
 import { formatCount, formatRelativeTime } from '@/utils/format';
 import { Thumbnail } from './Thumbnail';
+import { videoA11yLabel } from '@/lib/a11y/videoLabel';
 
 type Props = { video: VideoCardData };
 
@@ -25,7 +26,7 @@ export const VideoCard = memo(({ video }: Props) => {
   return (
     <PressableScale
       accessibilityRole='button'
-      accessibilityLabel={`${video.title}, by ${video.creator.name}`}
+      accessibilityLabel={videoA11yLabel(video)}
       onPress={() =>
         router.push({ pathname: '/video/[id]', params: { id: video.id } })
       }
