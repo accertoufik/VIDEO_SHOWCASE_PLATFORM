@@ -4,7 +4,6 @@ import { ActivityIndicator, ScrollView, StyleSheet, View, useWindowDimensions, t
 import { useDockInset } from '@/components/navigation/useDockInset';
 import { ProfileHeader } from '@/features/profile/ProfileHeader';
 import { Ionicons } from '@expo/vector-icons';
-import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { GlassButton } from '@/components/ui/GlassButton';
 import { GlassIconButton } from '@/components/ui/GlassIconButton';
@@ -197,11 +196,15 @@ const CreatorScreen = () => {
             ]}
           />
         ) : (
-          <EmptyState
-            icon='videocam-off-outline'
-            title='Not a creator yet'
-            message='This person has no channel or videos.'
-          />
+          <View style={styles.notCreator}>
+            <Ionicons name='person-outline' size={40} color={colors.text.muted} />
+            <AppText variant='h3' style={styles.center}>
+              Not a creator yet
+            </AppText>
+            <AppText variant='bodySmall' color='secondary' style={styles.center}>
+              This person has no channel or videos.
+            </AppText>
+          </View>
         )}
       </ScrollView>
     </View>
@@ -217,6 +220,19 @@ const styles = StyleSheet.create({
   grid: {},
   top: { alignItems: 'flex-start' },
   empty: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.section },
+  notCreator: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.xl,
+    paddingVertical: spacing.xxxl,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radii.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.surface.border,
+    backgroundColor: colors.surface.elevated,
+  },
+  center: { textAlign: 'center' },
   identity: { gap: spacing.md, paddingTop: spacing.md },
   tabs: {
     flexDirection: 'row',
