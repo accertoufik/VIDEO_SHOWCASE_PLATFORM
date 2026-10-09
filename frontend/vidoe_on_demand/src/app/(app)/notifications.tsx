@@ -68,8 +68,12 @@ const NotificationsScreen = () => {
       type: n.type,
       videoId: n.videoId,
       username: n.actor?.username,
+      videoType: n.video?.type,
     });
-    if (href) router.push(href);
+    if (!href) return;
+    // Shorts live in a tab: switch to it (and close this screen) instead of stacking another screen on top.
+    if (typeof href === 'object' && href.pathname === '/shorts') router.navigate(href);
+    else router.push(href);
   };
 
   return (

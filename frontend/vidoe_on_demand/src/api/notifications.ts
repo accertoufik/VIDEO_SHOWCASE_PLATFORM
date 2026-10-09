@@ -44,6 +44,7 @@ const toNotification = (raw: Raw): AppNotification => {
       ? {
           id: String(video.id),
           title: str(video.title) ?? '',
+          type: video.type === 'SHORT_FORM' ? 'SHORT_FORM' : video.type === 'LONG_FORM' ? 'LONG_FORM' : null,
           thumbnailUrl: str(video.thumbnailUrl),
         }
       : null,

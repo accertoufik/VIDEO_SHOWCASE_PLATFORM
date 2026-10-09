@@ -121,7 +121,7 @@ export const NotificationService = {
                 where: { recipientId: user.id },
                 include: {
                     actor: { include: { profile: { include: { avatarAsset: true } } } },
-                    video: { select: { id: true, title: true, thumbnailAsset: { select: { blobPath: true } } } },
+                    video: { select: { id: true, title: true, type: true, thumbnailAsset: { select: { blobPath: true } } } },
                 },
                 orderBy: { createdAt: 'desc' },
                 take: limit + 1,
@@ -153,7 +153,7 @@ export const NotificationService = {
                         actor: profile
                             ? { displayName: profile.displayName, username: profile.username, avatarUrl }
                             : null,
-                        video: n.video ? { id: n.video.id, title: n.video.title, thumbnailUrl } : null,
+                        video: n.video ? { id: n.video.id, title: n.video.title, type: n.video.type, thumbnailUrl } : null,
                     };
                 }),
             );

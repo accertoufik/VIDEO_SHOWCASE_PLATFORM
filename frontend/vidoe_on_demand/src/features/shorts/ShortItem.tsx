@@ -22,12 +22,14 @@ type Props = {
   /** The Shorts tab is focused and the app is in the foreground. */
   screenActive: boolean;
   muted: boolean;
+  /** Set (to a changing value) to open the comments as soon as this short is on screen, e.g. from a notification. */
+  autoOpenCommentsKey?: string;
 };
 
 // One full-screen short: thumbnail until the first frame, the player (mounted only while active, so at most one
 // decoder is alive), tap to pause/resume, and the like/comment/follow overlay.
 export const ShortItem = memo(
-  ({ video, height, active, preload, screenActive, muted }: Props) => {
+  ({ video, height, active, preload, screenActive, muted, autoOpenCommentsKey }: Props) => {
     const api = useApi();
     const { isSignedIn } = useAuth();
     const [commentsOpen, setCommentsOpen] = useState(false);
@@ -48,6 +50,10 @@ export const ShortItem = memo(
       }
       if (!active && !preload) setFirstFrame(false);
     }, [active, preload]);
+
+    useEffect(() => {
+      if (autoOpenCommentsKey && active) setCommentsOpen(true);
+    }, [autoOpenCommentsKey, active]);
 
     // Only the active short plays; the preloading one stays paused and just buffers. Opening the comments does NOT
     // pause it: people comment while it keeps playing.

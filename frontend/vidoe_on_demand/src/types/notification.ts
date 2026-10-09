@@ -16,7 +16,7 @@ export type AppNotification = {
   createdAt: string;
   videoId: string | null;
   actor: { name: string; username: string; avatarUrl: string | null } | null;
-  video: { id: string; title: string; thumbnailUrl: string | null } | null;
+  video: { id: string; title: string; type: 'LONG_FORM' | 'SHORT_FORM' | null; thumbnailUrl: string | null } | null;
 };
 
 export type NotificationsPage = {

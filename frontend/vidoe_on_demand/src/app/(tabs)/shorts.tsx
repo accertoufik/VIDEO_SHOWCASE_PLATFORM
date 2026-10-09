@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useIsFocused, useRouter } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
+import { useIsFocused, useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -17,6 +17,7 @@ import { AppText } from '@/components/ui/Text';
 import { colors, layout, spacing } from '@/css';
 import { ShortItem } from '@/features/shorts/ShortItem';
 import { useShorts } from '@/hooks/queries/useShorts';
+import { useVideo } from '@/hooks/queries/useVideo';
 import { useAppActive } from '@/hooks/useAppActive';
 import { useReduceMotion } from '@/lib/a11y/useReduceMotion';
 import { useScreenReader } from '@/lib/a11y/useScreenReader';
@@ -35,6 +36,18 @@ const ShortsScreen = () => {
   const appActive = useAppActive();
   const query = useShorts();
 
+  // A notification (or a link) can ask for one specific short, optionally with its comments open.
+  const params = useLocalSearchParams<{ video?: string; comments?: string; t?: string }>();
+  const [pin, setPin] = useState<{ id: string; comments: boolean; key: string } | null>(null);
+  useEffect(() => {
+    if (!params.video) return;
+    setPin({ id: params.video, comments: params.comments === '1', key: params.t ?? String(Date.now()) });
+    // Consumed: clear the params so opening the Shorts tab from the dock later doesn't repeat this.
+    router.setParams({ video: undefined, comments: undefined, t: undefined });
+  }, [params.video, params.comments, params.t, router]);
+  const pinned = useVideo(pin?.id ?? '');
+  const pinnedCard = pin && pinned.data ? (pinned.data.video as unknown as VideoCardData) : null;
+
   const [height, setHeight] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [muted, setMuted] = useState(false);
@@ -47,16 +60,21 @@ const ShortsScreen = () => {
       animated: !reduceMotion,
     });
 
-  const videos = useMemo(
+  const feedVideos = useMemo(
     () => uniqueById(query.data?.pages.flatMap((page) => page.videos) ?? []),
     [query.data],
+  );
+  // The requested short goes first (and is not repeated further down the feed).
+  const videos = useMemo(
+    () => (pinnedCard ? [pinnedCard, ...feedVideos.filter((v) => v.id !== pinnedCard.id)] : feedVideos),
+    [feedVideos, pinnedCard],
   );
 
   const slots = useMemo<Slot[]>(() => {
     if (videos.length === 0) return [];
     const count = query.hasNextPage ? videos.length : videos.length * LOOP_REPEATS;
     return Array.from({ length: count }, (_, i) => ({
-      key: String(i),
+      key: `${(videos[i % videos.length] as VideoCardData).id}:${i}`,
       video: videos[i % videos.length] as VideoCardData,
     }));
   }, [videos, query.hasNextPage]);
@@ -70,12 +88,20 @@ const ShortsScreen = () => {
   ).current;
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
 
+  // Jump to the top whenever a different short was requested.
+  useEffect(() => {
+    if (!pin || !pinnedCard) return;
+    setActiveIndex(0);
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pin?.key, pinnedCard?.id]);
+
   const screenActive = focused && appActive;
   const slotsLengthRef = useRef(0);
   slotsLengthRef.current = slots.length;
 
   let body;
-  if (query.isPending) {
+  if (query.isPending || (pin && pinned.isPending)) {
     body = (
       <View style={styles.center}>
         <ActivityIndicator size='large' color={colors.accent.text} />
@@ -111,6 +137,7 @@ const ShortsScreen = () => {
             preload={index === activeIndex + 1}
             screenActive={screenActive}
             muted={muted}
+            autoOpenCommentsKey={index === 0 && pin?.comments && pinnedCard ? pin.key : undefined}
           />
         )}
         // One short per screen, snapping like a pager.
