@@ -8,10 +8,12 @@ import { prisma } from '../config/db';
  *   - jobs QUEUED / RUNNING / RETRYING and the worker is not running  -> start it
  *   - no such jobs for WORKER_IDLE_MINUTES (since the last job activity) and the worker is running -> stop it
  *
- * It talks to Azure with the app's managed identity (no secrets), which has a role on the worker container only.
+ * It talks to Azure as a dedicated service principal whose only permission is managing the worker container group
+ * (the Container Apps "express" environment this API runs in does not support managed identities).
  * Off unless WORKER_AUTOSCALE=true, so local development never touches Azure.
  *
  * Env: WORKER_AUTOSCALE, AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, WORKER_CONTAINER_GROUP,
+ *      AZURE_AUTOSCALE_TENANT_ID, AZURE_AUTOSCALE_CLIENT_ID, AZURE_AUTOSCALE_CLIENT_SECRET,
  *      WORKER_IDLE_MINUTES (default 10), WORKER_POLL_SECONDS (default 30).
  */
 const ARM = 'https://management.azure.com';
@@ -28,18 +30,26 @@ const config = () => ({
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
 
-/** Token for Azure Resource Manager from the Container Apps managed identity endpoint. */
+/** Token for Azure Resource Manager, from the dedicated service principal (client-credentials flow). */
 const armToken = async (): Promise<string> => {
   if (cachedToken && cachedToken.expiresAt - Date.now() > 120_000) return cachedToken.value;
-  const endpoint = process.env.IDENTITY_ENDPOINT;
-  const header = process.env.IDENTITY_HEADER;
-  if (!endpoint || !header) throw new Error('No managed identity available (IDENTITY_ENDPOINT / IDENTITY_HEADER missing)');
-  const res = await fetch(`${endpoint}?resource=${encodeURIComponent(`${ARM}/`)}&api-version=2019-08-01`, {
-    headers: { 'X-IDENTITY-HEADER': header },
+  const tenant = process.env.AZURE_AUTOSCALE_TENANT_ID;
+  const clientId = process.env.AZURE_AUTOSCALE_CLIENT_ID;
+  const clientSecret = process.env.AZURE_AUTOSCALE_CLIENT_SECRET;
+  if (!tenant || !clientId || !clientSecret) throw new Error('AZURE_AUTOSCALE_TENANT_ID / _CLIENT_ID / _CLIENT_SECRET are not all set');
+  const res = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: `${ARM}/.default`,
+    }),
   });
-  if (!res.ok) throw new Error(`Managed identity token request failed: ${res.status}`);
-  const body = (await res.json()) as { access_token: string; expires_on: string };
-  cachedToken = { value: body.access_token, expiresAt: Number(body.expires_on) * 1000 };
+  if (!res.ok) throw new Error(`Azure sign-in for the autoscaler failed: ${res.status}`);
+  const body = (await res.json()) as { access_token: string; expires_in: number };
+  cachedToken = { value: body.access_token, expiresAt: Date.now() + body.expires_in * 1000 };
   return cachedToken.value;
 };
 
