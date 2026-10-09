@@ -155,7 +155,6 @@ const SettingsScreen = () => {
           <ListRow
             icon='play-outline'
             label='Autoplay'
-            description='Start videos as soon as they open'
             right={
               <Switch
                 {...switchProps}
@@ -191,7 +190,6 @@ const SettingsScreen = () => {
           <ListRow
             icon='phone-portrait-outline'
             label='Haptic feedback'
-            description='Small vibrations when you tap, follow or publish'
             right={
               <Switch
                 {...switchProps}
@@ -212,7 +210,6 @@ const SettingsScreen = () => {
           <ListRow
             icon='time-outline'
             label='Clear watch history'
-            description='Removes your history and Continue Watching'
             onPress={confirmClear}
             disabled={clearHistory.isPending}
           />
@@ -230,7 +227,6 @@ const SettingsScreen = () => {
           <ListRow
             icon='trash-outline'
             label='Delete account'
-            description='Permanently removes your account and everything on it'
             destructive
             onPress={confirmDelete}
             disabled={deleting}

@@ -123,13 +123,11 @@ const ProfileTab = () => {
             <ListRow
               icon='stats-chart-outline'
               label='Creator Studio'
-              description='Stats, videos and comments'
               onPress={() => router.push('/studio')}
             />
             <ListRow
               icon='create-outline'
               label='Edit channel'
-              description='About and banner'
               onPress={() => router.push('/become-creator')}
             />
             {username ? (
@@ -146,7 +144,6 @@ const ProfileTab = () => {
               highlight
               icon='videocam-outline'
               label='Become a creator'
-              description='Set up your channel and start uploading'
               onPress={() => router.push('/become-creator')}
             />
           </ListGroup>
@@ -156,27 +153,23 @@ const ProfileTab = () => {
           <ListRow
             icon='albums-outline'
             label='Dashboard'
-            description='History, liked, saved and continue watching'
             onPress={() => router.push('/dashboard')}
           />
           <ListRow
             icon='people-outline'
             label='Following'
-            description='Creators you follow'
             onPress={() => router.push('/following')}
           />
           {me.data?.creatorProfile ? (
             <ListRow
               icon='people-circle-outline'
               label='Followers'
-              description='People who follow you'
               onPress={() => router.push('/followers')}
             />
           ) : null}
           <ListRow
             icon='notifications-outline'
             label='Notifications'
-            description='All activity and updates'
             value={unread > 0 ? `${unread} new` : undefined}
             onPress={() => router.push('/notifications')}
           />
