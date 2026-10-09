@@ -70,7 +70,6 @@ export const OverviewPage = () => {
             icon='stats-chart-outline'
             title='Nothing to show yet'
             message='Upload your first video and your stats will appear here.'
-            action={{ label: 'Upload a video', onPress: () => router.push('/upload') }}
           />
         ) : (
           <>

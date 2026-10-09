@@ -31,7 +31,7 @@ const SPRING = { damping: 18, stiffness: 220, mass: 0.8 } as const;
 
 /**
  * Floating pill dock (Telegram-style): a rounded glass bar hovering above the safe area, with one soft capsule that
- * glides to whichever tab is active, and the raised "+" in the middle. Drawn once by the root layout.
+ * glides to whichever tab is active, and the "+" in the middle slot, sitting inside the bar. Drawn once by the root layout.
  */
 export const GlassDock = () => {
   const pathname = usePathname();
@@ -104,7 +104,7 @@ export const GlassDock = () => {
       ]}
     >
       <View style={styles.dock} accessibilityRole='tablist'>
-        {/* The glass is its own clipped layer so the raised "+" can rise above the dock's top edge un-clipped. */}
+        {/* The glass is its own clipped layer (rounded corners + blur). */}
         <View style={styles.glass} pointerEvents='none'>
           {Platform.OS === 'android' ? null : <BlurView intensity={90} tint='dark' style={StyleSheet.absoluteFill} />}
           <View style={[StyleSheet.absoluteFill, styles.fill]} />
@@ -176,7 +176,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent.primary,
     borderWidth: 3,
     borderColor: colors.background.primary,
-    transform: [{ translateY: -18 }],
     ...shadows.glow,
   },
 });

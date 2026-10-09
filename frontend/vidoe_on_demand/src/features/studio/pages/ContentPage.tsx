@@ -5,7 +5,6 @@ import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 import { EmptyNotice } from '@/components/ui/EmptyNotice';
 import { ListSkeleton, ScreenSkeleton } from '@/components/ui/skeletons';
 import { ErrorState } from '@/components/ui/ErrorState';
-import { GlassButton } from '@/components/ui/GlassButton';
 import { colors, layout, spacing } from '@/css';
 import { EditVideoSheet } from '@/features/creator/EditVideoSheet';
 import { MyVideoRow } from '@/features/creator/MyVideoRow';
@@ -51,22 +50,11 @@ export const ContentPage = () => {
           />
         )}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
-        ListHeaderComponent={
-          <View style={styles.header}>
-            <GlassButton
-              label='Upload a video'
-              variant='glass'
-              fullWidth
-              onPress={() => router.push('/upload')}
-            />
-          </View>
-        }
         ListEmptyComponent={
           <EmptyNotice
             icon='videocam-outline'
             title='No videos yet'
             message='Upload your first video. It stays private until you publish it.'
-            action={{ label: 'Upload a video', onPress: () => router.push('/upload') }}
           />
         }
         contentContainerStyle={[
@@ -105,6 +93,5 @@ export const ContentPage = () => {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background.primary },
   content: { paddingHorizontal: layout.screenPadding, paddingTop: spacing.sm },
-  header: { gap: spacing.lg, paddingBottom: spacing.lg },
   separator: { height: spacing.lg },
 });
