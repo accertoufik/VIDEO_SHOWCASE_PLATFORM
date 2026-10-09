@@ -1,4 +1,4 @@
-import { useEvent } from 'expo';
+import { useEffect, useRef, useState } from 'react';
 import type { VideoPlayer } from 'expo-video';
 import { StyleSheet, Text, View } from 'react-native';
 import { colors, fonts } from '@/css';
@@ -56,15 +56,38 @@ const Line = ({ text, italic, fontSize }: { text: string; italic: boolean; fontS
   );
 };
 
-/** Draws the cues for the current playback time. Re-renders on its own, so the player screen doesn't. */
-export const SubtitleOverlay = ({ player, cues, fontSize, bottomOffset, delaySeconds = 0 }: Props) => {
-  const { currentTime } = useEvent(player, 'timeUpdate', {
-    currentTime: player.currentTime,
-  } as never) as { currentTime: number };
+const sameCues = (a: Cue[], b: Cue[]) => a.length === b.length && a.every((cue, i) => cue === b[i]);
 
-  if (cues.length === 0) return null;
-  const active = cuesAt(cues, currentTime - delaySeconds);
-  if (active.length === 0) return null;
+/**
+ * Draws the cues for the current playback time. It reads the player's clock directly every ~40 ms instead of
+ * waiting for the player's "time update" event (which fires only 4 times a second and then goes through the
+ * bridge and a React render), because captions driven by that event trailed the picture by up to a second or
+ * more. State only changes when a caption actually appears or disappears, so this doesn't re-render all the time.
+ */
+export const SubtitleOverlay = ({ player, cues, fontSize, bottomOffset, delaySeconds = 0 }: Props) => {
+  const [active, setActive] = useState<Cue[]>([]);
+  const activeRef = useRef<Cue[]>([]);
+
+  useEffect(() => {
+    const tick = () => {
+      let now = 0;
+      try {
+        now = player.currentTime;
+      } catch {
+        return; // the player is being released
+      }
+      const next = cuesAt(cues, now - delaySeconds);
+      if (!sameCues(next, activeRef.current)) {
+        activeRef.current = next;
+        setActive(next);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 40);
+    return () => clearInterval(id);
+  }, [player, cues, delaySeconds]);
+
+  if (cues.length === 0 || active.length === 0) return null;
 
   return (
     <View style={[styles.wrap, { bottom: bottomOffset }]} pointerEvents='none'>
