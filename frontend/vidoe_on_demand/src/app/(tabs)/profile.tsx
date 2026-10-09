@@ -170,7 +170,6 @@ const ProfileTab = () => {
               icon='people-circle-outline'
               label='Followers'
               description='People who follow you'
-              value={followers != null ? formatCount(followers) : undefined}
               onPress={() => router.push('/followers')}
             />
           ) : null}
