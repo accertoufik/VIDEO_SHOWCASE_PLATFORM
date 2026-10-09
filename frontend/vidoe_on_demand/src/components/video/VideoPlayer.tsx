@@ -764,14 +764,14 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
                       <AppText variant='title' style={styles.sheetRowLabel}>
                         Subtitle delay
                       </AppText>
-                      <Pressable onPress={() => changeSubDelay(subDelay - 0.5)} hitSlop={8} accessibilityRole='button' accessibilityLabel='Show subtitles earlier'>
+                      <Pressable onPress={() => changeSubDelay(subDelay - 0.1)} hitSlop={8} accessibilityRole='button' accessibilityLabel='Show subtitles earlier'>
                         <Ionicons name='remove-circle-outline' size={30} color={colors.text.primary} />
                       </Pressable>
                       <AppText variant='body' style={styles.delayValue}>
                         {subDelay > 0 ? '+' : ''}
                         {subDelay.toFixed(1)} s
                       </AppText>
-                      <Pressable onPress={() => changeSubDelay(subDelay + 0.5)} hitSlop={8} accessibilityRole='button' accessibilityLabel='Show subtitles later'>
+                      <Pressable onPress={() => changeSubDelay(subDelay + 0.1)} hitSlop={8} accessibilityRole='button' accessibilityLabel='Show subtitles later'>
                         <Ionicons name='add-circle-outline' size={30} color={colors.text.primary} />
                       </Pressable>
                     </View>
