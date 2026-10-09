@@ -1,5 +1,6 @@
 import { ErrorState } from '@/components/ui/ErrorState';
 import { GlassButton } from '@/components/ui/GlassButton';
+import { EmptyHero } from '@/components/ui/EmptyHero';
 import { GlassIconButton } from '@/components/ui/GlassIconButton';
 import { AppText } from '@/components/ui/Text';
 import { colors, layout, radii, spacing, typography } from '@/css';
@@ -166,13 +167,7 @@ export const CommentsSheet = ({ videoId, visible, count, onClose, belowPlayer = 
                   onRetry={() => comments.refetch()}
                 />
               ) : (
-                <View style={styles.empty}>
-                  <Ionicons name='chatbubbles-outline' size={34} color={colors.text.primary} />
-                  <AppText variant='title'>No comments yet</AppText>
-                  <AppText variant='bodySmall' color='secondary'>
-                    Start the conversation.
-                  </AppText>
-                </View>
+                <EmptyHero icon='chatbubbles-outline' title='No comments yet' message='Start the conversation.' />
               )
             }
             contentContainerStyle={styles.list}

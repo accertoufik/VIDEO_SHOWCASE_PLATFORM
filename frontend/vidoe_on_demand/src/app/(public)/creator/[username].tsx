@@ -4,6 +4,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, View, useWindowDimensions, t
 import { useDockInset } from '@/components/navigation/useDockInset';
 import { ProfileHeader } from '@/features/profile/ProfileHeader';
 import { Ionicons } from '@expo/vector-icons';
+import { EmptyHero } from '@/components/ui/EmptyHero';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { GlassButton } from '@/components/ui/GlassButton';
 import { GlassIconButton } from '@/components/ui/GlassIconButton';
@@ -99,16 +100,10 @@ const CreatorScreen = () => {
     if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
     if (items.length === 0)
       return (
-        <View style={styles.empty}>
-          <Ionicons
-            name={kind === 'videos' ? 'videocam-outline' : 'flash-outline'}
-            size={32}
-            color={colors.text.primary}
-          />
-          <AppText variant='body' color='secondary'>
-            {kind === 'videos' ? 'Nothing uploaded yet' : 'No Shorts here yet'}
-          </AppText>
-        </View>
+        <EmptyHero
+          icon={kind === 'videos' ? 'videocam-outline' : 'flash-outline'}
+          title={kind === 'videos' ? 'Nothing uploaded yet' : 'No Shorts here yet'}
+        />
       );
     return (
       <View style={kind === 'shorts' ? styles.shortsGrid : styles.grid}>
