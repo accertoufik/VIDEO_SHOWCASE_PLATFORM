@@ -68,13 +68,16 @@ export const usePreferences = () =>
 
 /**
  * Which stream to start on. `readyLabels` are the video's finished renditions, tallest first.
- * A preference the video can't satisfy falls back to adaptive ("auto").
+ *
+ * "Auto" and "Best available" both use the ADAPTIVE stream: the player picks the best rendition the connection can
+ * sustain and moves down (and back up) as the speed changes. "Best available" used to pin the tallest rendition as
+ * one fixed stream, which has nothing to switch to, so playback stalled instead of dropping quality when the
+ * connection got slow. Only "Data saver" pins a single (the smallest) rendition.
  */
 export const resolveStreamQuality = (
   preferred: PreferredQuality,
   readyLabels: string[],
 ): string => {
-  if (preferred === 'highest') return readyLabels[0] ?? 'auto';
   if (preferred === 'lowest')
     return readyLabels[readyLabels.length - 1] ?? 'auto';
   return 'auto';

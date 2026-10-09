@@ -181,8 +181,8 @@ const SettingsScreen = () => {
               ))}
             </View>
             <AppText variant='bodySmall' color='muted'>
-              Applies to the next video you open. You can still change it in the player. These settings stay on this
-              phone.
+              Auto and Best available follow your connection speed, dropping to a lower quality when it slows down. Data
+              saver always plays the smallest. Applies to the next video you open; you can still change it in the player.
             </AppText>
           </View>
         </ListGroup>
