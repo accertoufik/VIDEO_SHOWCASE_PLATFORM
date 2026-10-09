@@ -33,7 +33,7 @@ export const Thumbnail = ({
         style={StyleSheet.absoluteFill}
         contentFit='cover'
         transition={180}
-        recyclingKey={uri}
+        recyclingKey={uri.split('?')[0]}
         accessibilityIgnoresInvertColors
       />
     ) : (

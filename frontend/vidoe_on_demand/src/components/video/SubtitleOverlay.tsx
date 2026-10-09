@@ -11,6 +11,8 @@ type Props = {
   fontSize: number;
   /** Lift the captions above the controls while they're showing. */
   bottomOffset: number;
+  /** Seconds to hold the captions back (+) or bring them forward (-), for files whose captions are timed off. */
+  delaySeconds?: number;
 };
 
 // Crunchyroll-style captions: bold white text with a black outline, no background box, centred near the bottom.
@@ -55,13 +57,13 @@ const Line = ({ text, italic, fontSize }: { text: string; italic: boolean; fontS
 };
 
 /** Draws the cues for the current playback time. Re-renders on its own, so the player screen doesn't. */
-export const SubtitleOverlay = ({ player, cues, fontSize, bottomOffset }: Props) => {
+export const SubtitleOverlay = ({ player, cues, fontSize, bottomOffset, delaySeconds = 0 }: Props) => {
   const { currentTime } = useEvent(player, 'timeUpdate', {
     currentTime: player.currentTime,
   } as never) as { currentTime: number };
 
   if (cues.length === 0) return null;
-  const active = cuesAt(cues, currentTime);
+  const active = cuesAt(cues, currentTime - delaySeconds);
   if (active.length === 0) return null;
 
   return (

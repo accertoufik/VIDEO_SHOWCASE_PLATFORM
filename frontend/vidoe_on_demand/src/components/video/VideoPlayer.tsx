@@ -1,5 +1,6 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEvent, useEventListener } from 'expo';
 import { NavigationBar } from 'expo-navigation-bar';
 import { useScreenReader } from '@/lib/a11y/useScreenReader';
@@ -184,6 +185,26 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
   const [captionKey, setCaptionKey] = useState<string | null>(null);
   const [cues, setCues] = useState<Cue[]>([]);
   const cueCache = useRef(new Map<string, Cue[]>());
+
+  // Subtitle delay (seconds): some files have captions timed a little off their soundtrack. Remembered per video.
+  const [subDelay, setSubDelay] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(`vod.subDelay.${video.id}`)
+      .then((raw) => {
+        const n = Number(raw);
+        if (alive && raw != null && Number.isFinite(n)) setSubDelay(n);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [video.id]);
+  const changeSubDelay = (next: number) => {
+    const value = Math.round(Math.max(-10, Math.min(10, next)) * 10) / 10;
+    setSubDelay(value);
+    AsyncStorage.setItem(`vod.subDelay.${video.id}`, String(value)).catch(() => {});
+  };
 
   const captionTracks = useQuery({
     queryKey: ['captions', video.id],
@@ -536,6 +557,7 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
           fontSize={isFull ? 22 : 15}
           // Sit above the seek bar while the controls are showing.
           bottomOffset={controlsVisible ? 64 : 18}
+          delaySeconds={subDelay}
         />
       ) : null}
 
@@ -735,6 +757,30 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
                       );
                     },
                   )}
+                  {subtitleTracks.length > 0 ? (
+                    <View style={styles.delayRow} accessibilityRole='adjustable' accessibilityLabel={`Subtitle delay ${subDelay > 0 ? 'plus' : subDelay < 0 ? 'minus' : ''} ${Math.abs(subDelay)} seconds`}>
+                      <AppText variant='title' style={styles.sheetRowLabel}>
+                        Subtitle delay
+                      </AppText>
+                      <Pressable onPress={() => changeSubDelay(subDelay - 0.5)} hitSlop={8} accessibilityRole='button' accessibilityLabel='Show subtitles earlier'>
+                        <Ionicons name='remove-circle-outline' size={30} color={colors.text.primary} />
+                      </Pressable>
+                      <AppText variant='body' style={styles.delayValue}>
+                        {subDelay > 0 ? '+' : ''}
+                        {subDelay.toFixed(1)} s
+                      </AppText>
+                      <Pressable onPress={() => changeSubDelay(subDelay + 0.5)} hitSlop={8} accessibilityRole='button' accessibilityLabel='Show subtitles later'>
+                        <Ionicons name='add-circle-outline' size={30} color={colors.text.primary} />
+                      </Pressable>
+                    </View>
+                  ) : null}
+                  {subDelay !== 0 ? (
+                    <Pressable onPress={() => changeSubDelay(0)} style={styles.sheetRow} accessibilityRole='button'>
+                      <AppText variant='bodySmall' color='accent' style={styles.sheetRowLabel}>
+                        Reset delay
+                      </AppText>
+                    </Pressable>
+                  ) : null}
                 </>
               ) : menuPage === 'speed' ? (
                 <View style={styles.speedGrid}>
@@ -833,6 +879,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   sheetTitle: { paddingHorizontal: spacing.xl, paddingVertical: spacing.sm },
+  delayRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
+  delayValue: { minWidth: 64, textAlign: 'center' },
   sheetRow: {
     flexDirection: 'row',
     alignItems: 'center',
