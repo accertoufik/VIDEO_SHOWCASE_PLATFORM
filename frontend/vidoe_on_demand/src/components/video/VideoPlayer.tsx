@@ -222,6 +222,14 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
   }, [player]);
   useEffect(forceNativeCaptionsOff, [forceNativeCaptionsOff]);
   useEventListener(player, 'availableSubtitleTracksChange', forceNativeCaptionsOff);
+
+  // The quality the player is showing right now. On "Auto" it moves with the connection speed, so the menu can say
+  // which one Auto has picked ("Auto · 720p"). null until the player reports its first track.
+  const [liveHeight, setLiveHeight] = useState<number | null>(null);
+  useEventListener(player, 'videoTrackChange', ({ videoTrack }) => {
+    const h = videoTrack?.size?.height;
+    setLiveHeight(h && h > 0 ? h : null);
+  });
   useEventListener(player, 'subtitleTrackChange', forceNativeCaptionsOff);
 
   useEffect(() => {
@@ -425,9 +433,10 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
     setQuality(next);
   };
 
+  const autoLabel = liveHeight ? `Auto · ${liveHeight}p` : 'Auto';
   const readyVariants = video.variants.filter((v) => v.ready);
   const options = [
-    { key: 'auto', label: 'Auto' },
+    { key: 'auto', label: autoLabel },
     ...readyVariants.map((v) => ({ key: v.label, label: v.label })),
   ];
 
@@ -602,7 +611,7 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
         />
         <GlassIconButton
           icon='settings-outline'
-          label={`Settings. Speed ${speedLabel(speed)}, quality ${quality === 'auto' ? 'automatic' : quality}`}
+          label={`Settings. Speed ${speedLabel(speed)}, quality ${quality === 'auto' ? `automatic${liveHeight ? `, now ${liveHeight}p` : ''}` : quality}`}
           onPress={toggleMenu}
         />
       </View>
@@ -633,14 +642,14 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
                 onPress={() => setMenuPage('quality')}
                 style={styles.sheetRow}
                 accessibilityRole='menuitem'
-                accessibilityLabel={`Quality, ${quality === 'auto' ? 'automatic' : quality}`}
+                accessibilityLabel={`Quality, ${quality === 'auto' ? `automatic${liveHeight ? `, now ${liveHeight}p` : ''}` : quality}`}
               >
                 <Ionicons name='options-outline' size={22} color={colors.text.secondary} />
                 <AppText variant='title' style={styles.sheetRowLabel}>
                   Quality
                 </AppText>
                 <AppText variant='body' color='muted'>
-                  {quality === 'auto' ? 'Auto' : quality}
+                  {quality === 'auto' ? autoLabel : quality}
                 </AppText>
                 <Ionicons name='chevron-forward' size={18} color={colors.text.muted} />
               </Pressable>
