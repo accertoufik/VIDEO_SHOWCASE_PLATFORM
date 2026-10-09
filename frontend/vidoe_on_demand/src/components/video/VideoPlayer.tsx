@@ -2,6 +2,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEvent, useEventListener } from 'expo';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationBar } from 'expo-navigation-bar';
 import { useScreenReader } from '@/lib/a11y/useScreenReader';
 import { lockForFullscreenVideo, lockToPortrait } from '@/lib/orientation';
@@ -78,6 +79,7 @@ const CompatibleVideoView = VideoView as unknown as ComponentType<
 >;
 
 export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
+  const insets = useSafeAreaInsets();
   const { isSignedIn, getToken } = useAuth();
   const api = useApi();
   const getTokenRef = useRef(getToken);
@@ -654,7 +656,7 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
           onPress={closeSettings}
           accessibilityLabel='Close settings'
         />
-        <GlassSurface variant='strong' radius='xl' style={styles.sheet}>
+        <GlassSurface variant='strong' radius='xl' style={[styles.sheet, { marginBottom: spacing.md + insets.bottom }]}>
           {menuPage === 'main' ? (
             <>
               <AppText variant='label' color='muted' style={styles.sheetTitle}>
