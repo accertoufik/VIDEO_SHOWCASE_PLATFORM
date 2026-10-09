@@ -27,6 +27,8 @@ export const collectPurgeTargets = (videoId: string, assets: PurgeAsset[]): Purg
       const folder = a.blobPath.split('/')[0] ?? '';
       if (looksLikeVideoFolder(folder) && a.blobPath.includes('/')) {
         prefixes.set(`processed/${folder}/`, { container: 'processed', prefix: `${folder}/` });
+        // The worker's auto-generated thumbnail lives in the thumbnails container under the same folder name.
+        prefixes.set(`thumbnails/${folder}/`, { container: 'thumbnails', prefix: `${folder}/` });
       }
     }
   }

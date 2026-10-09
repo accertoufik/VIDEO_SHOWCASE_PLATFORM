@@ -13,6 +13,7 @@ test('selects the original, the processed folder and the custom thumbnail folder
   ]);
   expect(t.prefixes).toContainEqual({ container: 'processed', prefix: `${FOLDER}/` });
   expect(t.prefixes).toContainEqual({ container: 'thumbnails', prefix: `thumbnails/${VIDEO}/` });
+  expect(t.prefixes).toContainEqual({ container: 'thumbnails', prefix: `${FOLDER}/` }); // the auto thumbnail's folder
   expect(t.prefixes.filter((p) => p.container === 'processed')).toHaveLength(1); // one folder, not one per file
   expect(t.blobs).toContainEqual({ container: 'thumbnails', path: `${FOLDER}/thumbnail.jpg` });
   expect(t.blobs.some((b) => b.container === 'originals')).toBe(true);
