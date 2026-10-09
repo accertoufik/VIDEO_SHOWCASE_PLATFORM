@@ -21,6 +21,7 @@ import {
 } from '@/hooks/mutations/useHistoryMutations';
 import {
   useContinueWatching,
+  useFollowers,
   useFollowing,
   useHistory,
   useLikedVideos,
@@ -29,6 +30,7 @@ import {
 import { CreatorResultRow } from '@/features/search/CreatorResultRow';
 import { SectionHeader } from '@/features/home/SectionHeader';
 import type { LibraryVideo } from '@/types/library';
+import { FollowerRow } from './FollowerRow';
 import { PagedList } from './PagedList';
 
 const videoKey = (item: LibraryVideo) => item.key;
@@ -46,6 +48,7 @@ export type LibraryTab =
   | 'liked'
   | 'saved'
   | 'following'
+  | 'followers'
   | 'downloads';
 
 export const ContinuePane = () => {
@@ -161,6 +164,19 @@ export const FollowingPane = () => (
       icon: 'people-outline',
       title: 'Not following anyone',
       message: 'Follow creators to find them here.',
+    }}
+  />
+);
+
+export const FollowersPane = () => (
+  <PagedList
+    query={useFollowers()}
+    keyOf={(follower) => follower.id}
+    renderItem={(follower) => <FollowerRow follower={follower} />}
+    empty={{
+      icon: 'people-outline',
+      title: 'No followers yet',
+      message: 'People who follow you will appear here.',
     }}
   />
 );

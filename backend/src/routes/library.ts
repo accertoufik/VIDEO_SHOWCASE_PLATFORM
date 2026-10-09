@@ -94,3 +94,16 @@ libraryRouter.get(
     );
   }),
 );
+
+/** GET /api/me/followers — people who follow the caller's channel. */
+libraryRouter.get(
+  '/me/followers',
+  authenticateUser,
+  asyncHandler(async (req: AuthenticatedRequest, res) => {
+    const { limit, cursor } = parsePage(req.query);
+    sendSuccessResponse(
+      res,
+      await LibraryService.listFollowers(authId(req), limit, cursor),
+    );
+  }),
+);

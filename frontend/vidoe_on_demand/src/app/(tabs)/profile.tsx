@@ -165,6 +165,15 @@ const ProfileTab = () => {
             description='Creators you follow'
             onPress={() => router.push('/following')}
           />
+          {me.data?.creatorProfile ? (
+            <ListRow
+              icon='people-circle-outline'
+              label='Followers'
+              description='People who follow you'
+              value={followers != null ? formatCount(followers) : undefined}
+              onPress={() => router.push('/followers')}
+            />
+          ) : null}
           <ListRow
             icon='notifications-outline'
             label='Notifications'

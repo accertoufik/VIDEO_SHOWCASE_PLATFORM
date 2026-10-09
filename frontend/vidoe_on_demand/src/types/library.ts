@@ -9,3 +9,13 @@ export type LibraryVideo = {
   video: VideoCardData;
   progress: PlaybackProgress | null;
 };
+
+/** Someone who follows your channel. They are ordinary users, not necessarily creators. */
+export type Follower = {
+  /** The follow row id: unique in the list. */
+  id: string;
+  name: string;
+  username: string | null;
+  avatarUrl: string | null;
+  followedAt: string;
+};

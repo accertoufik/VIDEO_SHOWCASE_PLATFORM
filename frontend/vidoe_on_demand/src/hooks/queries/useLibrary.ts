@@ -2,6 +2,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import {
   getContinueWatching,
+  getFollowers,
   getFollowing,
   getHistory,
   getLikedVideos,
@@ -44,3 +45,4 @@ export const useHistory = () => useCursorList('history', getHistory);
 export const useLikedVideos = () => useCursorList('liked', getLikedVideos);
 export const useSavedVideos = () => useCursorList('saved', getSavedVideos);
 export const useFollowing = () => useCursorList('following', getFollowing);
+export const useFollowers = () => useCursorList('followers', getFollowers);

@@ -8,6 +8,7 @@ import { colors } from '@/css';
 import {
   ContinuePane,
   DownloadsPane,
+  FollowersPane,
   FollowingPane,
   HistoryPane,
   LikedPane,
@@ -24,6 +25,7 @@ const TABS: Array<{ tab: LibraryTab; label: string }> = [
   { tab: 'liked', label: 'Liked' },
   { tab: 'saved', label: 'Saved' },
   { tab: 'following', label: 'Following' },
+  { tab: 'followers', label: 'Followers' },
   { tab: 'downloads', label: 'Downloads' },
 ];
 
@@ -65,6 +67,8 @@ const DashboardScreen = () => {
               return <SavedPane />;
             case 'following':
               return <FollowingPane />;
+            case 'followers':
+              return <FollowersPane />;
             case 'downloads':
               return <DownloadsPane />;
             default:

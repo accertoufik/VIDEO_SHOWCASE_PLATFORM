@@ -1,5 +1,5 @@
 import type { CreatorResult } from '@/types/search';
-import type { LibraryPage, LibraryVideo } from '@/types/library';
+import type { Follower, LibraryPage, LibraryVideo } from '@/types/library';
 import type { PlaybackProgress } from '@/types/video';
 import { toNumber } from '@/utils/normalize';
 import { withQuery } from '@/utils/query';
@@ -92,6 +92,18 @@ export const getFollowing = (api: Api, p: PageParams) =>
         avatarUrl: str(c.avatarUrl),
       };
     }),
+    nextCursor: d.nextCursor,
+  }));
+
+export const getFollowers = (api: Api, p: PageParams) =>
+  fetchPage<Follower>(api, '/api/me/followers', p, (d) => ({
+    items: list(d.followers).map((f) => ({
+      id: String(f.followId ?? ''),
+      name: str(f.displayName) ?? str(f.username) ?? 'Someone',
+      username: str(f.username),
+      avatarUrl: str(f.avatarUrl),
+      followedAt: String(f.followedAt ?? ''),
+    })),
     nextCursor: d.nextCursor,
   }));
 

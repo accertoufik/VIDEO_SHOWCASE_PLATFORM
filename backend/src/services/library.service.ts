@@ -223,4 +223,68 @@ export const LibraryService = {
       throw new ApiError(500, 'Failed to load followed creators', error);
     }
   },
+
+  /**
+   * People who follow the caller's channel, most recently followed first. Cursor = Follow id.
+   * Only creators have followers, so anyone without a channel just gets an empty list.
+   */
+  listFollowers: async (
+    clerkUserId: string,
+    limit: number,
+    cursor?: string,
+  ) => {
+    try {
+      const userId = await getUserId(clerkUserId);
+      const channel = await prisma.creatorProfile.findUnique({
+        where: { userId },
+        select: { id: true },
+      });
+      if (!channel) return { followers: [], nextCursor: null };
+
+      const rows = await prisma.follow.findMany({
+        where: {
+          creatorId: channel.id,
+          follower: { deletedAt: null, accountStatus: 'ACTIVE' },
+        },
+        include: {
+          follower: { include: { profile: { include: { avatarAsset: true } } } },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      });
+      const { items, nextCursor } = toPage(rows, limit);
+
+      const followers = await Promise.all(
+        items.map(async (f) => {
+          const profile = f.follower.profile;
+          const avatarPath = profile?.avatarAsset?.blobPath;
+          let avatarUrl: string | null = null;
+          if (avatarPath) {
+            try {
+              avatarUrl = await AzureStorageService.generateReadSasUrl(
+                'thumbnails',
+                avatarPath,
+                60,
+              );
+            } catch {
+              // One unsignable avatar must not break the whole list.
+            }
+          }
+          return {
+            followId: f.id,
+            followedAt: f.createdAt,
+            userId: f.follower.id,
+            username: profile?.username ?? null,
+            displayName: profile?.displayName ?? null,
+            avatarUrl,
+          };
+        }),
+      );
+      return { followers, nextCursor };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, 'Failed to load followers', error);
+    }
+  },
 };
