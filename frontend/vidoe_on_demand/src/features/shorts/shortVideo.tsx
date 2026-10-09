@@ -49,9 +49,21 @@ export const ShortVideo = ({
     p.bufferOptions = { preferredForwardBufferDuration: PRELOAD_BUFFER_S };
   });
 
-  // Silent until it is the one on screen; the sound setting applies to the active short only.
+  // Silent until it is the one on screen; the sound setting applies to the active short only. The native player can
+  // reset its own volume while it loads or after a pause/resume, and a single "set it once" left some shorts silent,
+  // so the setting is re-applied whenever playback starts or the source becomes ready.
+  const applyAudio = () => {
+    try {
+      player.muted = active ? muted : true;
+      if (active) player.volume = 1;
+    } catch {
+      // the player may be released while the screen is closing
+    }
+  };
+
   useEffect(() => {
-    player.muted = active ? muted : true;
+    applyAudio();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player, muted, active]);
 
   useEffect(() => {
@@ -67,11 +79,20 @@ export const ShortVideo = ({
   // paused === true for the preloading short too: it buffers but never plays.
   useEffect(() => {
     if (paused) player.pause();
-    else player.play();
+    else {
+      player.play();
+      applyAudio();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player, paused]);
 
   useEventListener(player, 'playingChange', ({ isPlaying }) => {
+    if (isPlaying) applyAudio();
     if (isPlaying && active) onPlayStart();
+  });
+
+  useEventListener(player, 'statusChange', ({ status: next }) => {
+    if (next === 'readyToPlay') applyAudio();
   });
 
   const { status } = useEvent(player, 'statusChange', {
