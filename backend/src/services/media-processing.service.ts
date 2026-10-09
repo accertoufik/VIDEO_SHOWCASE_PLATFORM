@@ -176,6 +176,12 @@ const downloadToTemp = async (
  */
 const hlsOutputOptions = (preset: string) => [
   '-preset', preset,
+  // Phone-safe output whatever the upload was: most phones have no hardware decoder for 10-bit H.264 ("High 10",
+  // which 10-bit HEVC sources turn into) or for 5.1 AAC with an unknown channel layout. Force 8-bit High profile
+  // and stereo audio, as every earlier (working) video had.
+  '-pix_fmt', 'yuv420p',
+  '-profile:v', 'high',
+  '-ac', '2',
   '-hls_time', '6',
   '-hls_playlist_type', 'vod',
   '-f', 'hls',
