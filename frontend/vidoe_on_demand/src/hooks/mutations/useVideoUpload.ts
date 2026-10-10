@@ -10,10 +10,9 @@ import {
   type VideoUploadTicket,
 } from '@/api/uploads';
 import { useApi } from '@/lib/auth/useApi';
-import { describeError } from '@/lib/errors/describeError';
 import type { PickedImage } from '@/lib/media/pickImage';
 import type { PickedVideo } from '@/lib/media/pickVideo';
-import { UploadCancelledError, uploadToBlob } from '@/lib/upload/blobUpload';
+import { UploadCancelledError, UploadFileMissingError, uploadToBlob } from '@/lib/upload/blobUpload';
 
 export type UploadPhase =
   | 'idle'
@@ -139,7 +138,6 @@ export const useVideoUpload = () => {
           if (error instanceof UploadCancelledError) throw error;
           // The video matters more than its cover: carry on, the worker generates one automatically.
           thumbnailFailed = true;
-          if (__DEV__) console.warn('[upload] thumbnail failed:', error);
         }
       }
 
@@ -157,7 +155,11 @@ export const useVideoUpload = () => {
       }
       return {
         ok: false,
-        error: isApiError(error) ? error.message : describeError(error).message,
+        error: isApiError(error)
+          ? error.message
+          : error instanceof UploadFileMissingError
+            ? error.message
+            : "The upload didn't finish. Check your connection and try again.",
         cancelled: false,
       };
     } finally {

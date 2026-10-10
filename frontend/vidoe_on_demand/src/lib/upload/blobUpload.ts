@@ -7,6 +7,13 @@ export class UploadCancelledError extends Error {
   }
 }
 
+export class UploadFileMissingError extends Error {
+  constructor() {
+    super('That video is no longer available on your phone. Please choose it again.');
+    this.name = 'UploadFileMissingError';
+  }
+}
+
 type Options = {
   contentType: string;
   /** 0..1 */
@@ -24,6 +31,8 @@ export const uploadToBlob = async (
   { contentType, onProgress, signal }: Options,
 ) => {
   if (signal?.aborted) throw new UploadCancelledError();
+  const info = await FS.getInfoAsync(fileUri).catch(() => null);
+  if (!info?.exists) throw new UploadFileMissingError();
 
   const task = FS.createUploadTask(
     uploadUrl,

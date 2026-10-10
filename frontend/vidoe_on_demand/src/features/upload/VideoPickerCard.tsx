@@ -10,12 +10,14 @@ type Props = {
   video: PickedVideo | null;
   onPress: () => void;
   disabled?: boolean;
+  /** The library is handing the file over; a large video takes a moment. */
+  loading?: boolean;
 };
 
-export const VideoPickerCard = ({ video, onPress, disabled }: Props) => (
+export const VideoPickerCard = ({ video, onPress, disabled, loading }: Props) => (
   <PressableScale
     onPress={onPress}
-    disabled={disabled}
+    disabled={disabled || loading}
     accessibilityRole='button'
     accessibilityLabel={
       video ? 'Change selected video' : 'Choose a video to upload'
@@ -29,7 +31,14 @@ export const VideoPickerCard = ({ video, onPress, disabled }: Props) => (
         color={colors.text.primary}
       />
     </View>
-    {video ? (
+    {loading ? (
+      <View style={styles.meta}>
+        <AppText variant='label'>Preparing your video…</AppText>
+        <AppText variant='bodySmall' color='muted'>
+          Large files take a moment. Please wait.
+        </AppText>
+      </View>
+    ) : video ? (
       <View style={styles.meta}>
         <AppText variant='label' numberOfLines={1}>
           {video.name}

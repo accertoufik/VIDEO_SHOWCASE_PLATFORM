@@ -18,7 +18,8 @@ export const describeError = (
   if (!isApiError(error)) {
     return {
       kind: 'unknown',
-      message: error instanceof Error ? error.message : 'Something went wrong',
+      // Never show a system or library message (file paths, native exceptions) to people.
+      message: 'Something went wrong. Please try again.',
     };
   }
   const { status, message } = error;

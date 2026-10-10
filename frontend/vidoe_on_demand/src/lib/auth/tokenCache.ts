@@ -13,7 +13,6 @@ export const tokenCache = {
         } catch (error) {
             // A failed READ is not a reason to throw the stored session away: deleting it here is what used to sign
             // people out for good after a one-off keystore hiccup. Report "nothing found" and let the next read retry.
-            console.error('Error reading token from secure store:', error);
             return null;
         }
     },
@@ -23,8 +22,7 @@ export const tokenCache = {
         try {
             await SecureStore.setItemAsync(key, token);
         } catch (error) {
-            //storage failure only means that the user will have to log in again, so we can just log the error and continue
-            console.error('Error saving token to secure store:', error);
+            // a storage failure only means the user will have to log in again, so carry on
         }
     },
 }

@@ -24,7 +24,7 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import { useVideoUpload } from '@/hooks/mutations/useVideoUpload';
 import { useCategories } from '@/hooks/queries/useCategories';
 import { pickImage, type PickedImage } from '@/lib/media/pickImage';
-import { pickVideo, type PickedVideo } from '@/lib/media/pickVideo';
+import { discardPickedVideo, pickVideo, type PickedVideo } from '@/lib/media/pickVideo';
 import { toast } from '@/lib/toast';
 
 // Match the backend limits.
@@ -40,6 +40,7 @@ const UploadScreen = () => {
   const upload = useVideoUpload();
 
   const [video, setVideo] = useState<PickedVideo | null>(null);
+  const [picking, setPicking] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
@@ -77,8 +78,10 @@ const UploadScreen = () => {
   const choosePhoto = async (kind: 'video' | 'thumbnail') => {
     try {
       if (kind === 'video') {
-        const picked = await pickVideo();
+        setPicking(true);
+        const picked = await pickVideo().finally(() => setPicking(false));
         if (!picked) return;
+        void discardPickedVideo(video?.uri);
         setVideo(picked); // the title is typed by the creator: it is never filled in from the file name
       } else {
         const picked = await pickImage('thumbnail');
@@ -116,6 +119,7 @@ const UploadScreen = () => {
         : "Upload complete. We're processing your video.",
     );
     haptics.success();
+    void discardPickedVideo(video.uri);
     router.replace('/content');
   };
 
@@ -144,6 +148,7 @@ const UploadScreen = () => {
             <>
               <VideoPickerCard
                 video={video}
+                loading={picking}
                 onPress={() => choosePhoto('video')}
               />
 

@@ -13,7 +13,7 @@ export const AppErrorBoundary = ({ error, retry }: ErrorBoundaryProps) => (
       icon='warning-outline'
       title='Something went wrong'
       message={
-        __DEV__ ? error.message : 'We hit an unexpected problem. Please try again.'
+        'We hit an unexpected problem. Please try again.'
       }
       action={{ label: 'Try again', onPress: () => void retry() }}
     />
