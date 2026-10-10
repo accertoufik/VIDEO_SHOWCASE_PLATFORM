@@ -124,14 +124,16 @@ export const JobService = {
    * would ever pick it up. Called from the worker's tick: jobs RUNNING longer than `olderThanMs` go back
    * to QUEUED, up to MAX_RETRIES times; after that they are marked FAILED so a bad file can't loop forever.
    */
-  requeueStaleJobs: async (olderThanMs: number, maxRetries = 2) => {
+  requeueStaleJobs: async (olderThanMs: number, maxRetries = 2, runningHere: string[] = []) => {
     const cutoff = new Date(Date.now() - olderThanMs);
+    // Jobs this very worker is running are never "stale", however long a long film takes.
+    const notMine = runningHere.length > 0 ? { id: { notIn: runningHere } } : {};
     const requeued = await prisma.mediaProcessingJob.updateMany({
-      where: { status: 'RUNNING', startedAt: { lt: cutoff }, retryCount: { lt: maxRetries } },
+      where: { status: 'RUNNING', startedAt: { lt: cutoff }, retryCount: { lt: maxRetries }, ...notMine },
       data: { status: 'QUEUED', startedAt: null, retryCount: { increment: 1 } },
     });
     const failed = await prisma.mediaProcessingJob.updateMany({
-      where: { status: 'RUNNING', startedAt: { lt: cutoff }, retryCount: { gte: maxRetries } },
+      where: { status: 'RUNNING', startedAt: { lt: cutoff }, retryCount: { gte: maxRetries }, ...notMine },
       data: { status: 'FAILED', completedAt: new Date(), errorMessage: 'Timed out (worker stopped?)' },
     });
     return { requeued: requeued.count, failed: failed.count };
@@ -163,7 +165,8 @@ export const JobService = {
   /** called once ffmpeg finishes without error - records when it finished */
   markSucceeded: async (jobId: string) => {
     try {
-      await prisma.mediaProcessingJob.update({
+      // updateMany, not update: if the video was deleted meanwhile the row is gone, and that is not an error.
+      await prisma.mediaProcessingJob.updateMany({
         where: { id: jobId },
         data: { status: 'SUCCEEDED', completedAt: new Date() },
       });
@@ -181,7 +184,7 @@ export const JobService = {
 
   markFailed: async (jobId: string, errorMessage: string) => {
     try {
-      await prisma.mediaProcessingJob.update({
+      await prisma.mediaProcessingJob.updateMany({
         where: { id: jobId },
         data: {
           status: 'FAILED',

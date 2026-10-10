@@ -4,6 +4,9 @@ import { JobService } from "../services/job.service";
 import { MediaProcessingService } from "../services/media-processing.service";
 import { NotificationService } from "../services/notification.service";
 import { classifyVideoFormat } from '../lib/videoClassification';
+import { isCancelled, jobContext } from '../lib/jobContext';
+import { mediaBaseName } from '../lib/mediaPaths';
+import { deleteStorageTargets } from '../services/video-delete.service';
 
 /**
  * This file is a SEPARATE PROCESS from the API server — you run it with
@@ -145,6 +148,7 @@ const processTranscodeStandardJob = async (job: Job) => {
 
         await JobService.markSucceeded(job.id);
     } catch (error) {
+        if (isCancelled(error)) return; // the video was deleted: dispatch() cleans up
         console.error(`Error processing job ${job.id}:`, error);
         await JobService.markFailed(
             job.id,
@@ -214,6 +218,7 @@ const processTranscode1080pJob = async (job: Job) => {
 
         await JobService.markSucceeded(job.id);
     } catch (error) {
+        if (isCancelled(error)) return;
         // Not fatal to the video — 480p/720p already play fine, and it may
         // already be PUBLIC. Just means hdReady never flips true, so no
         // "HD ready" notification fires until this is retried/fixed.
@@ -253,6 +258,7 @@ const processTranscode1440pJob = async (job: Job) => {
 
         await JobService.markSucceeded(job.id);
     } catch (error) {
+        if (isCancelled(error)) return;
         // Not fatal — 480p/720p (and possibly 1080p) already play fine.
         console.error(`Error processing 1440p job ${job.id}:`, error);
         await JobService.markFailed(
@@ -310,6 +316,7 @@ const processThumbnailJob = async (job: Job) => {
 
         await JobService.markSucceeded(job.id);
     } catch (error) {
+        if (isCancelled(error)) return; // the video was deleted: dispatch() cleans up
         console.error(`Error processing thumbnail job ${job.id}:`, error);
         await JobService.markFailed(
             job.id,
@@ -483,67 +490,140 @@ const deliverHdFollowUpNotifications = async () => {
     }
 };
 
-/** Dispatches one claimed job to its handler, then re-checks standard-readiness for its video. */
+/** How often a running job checks that its video still exists. */
+const WATCH_INTERVAL_MS = Number(process.env.JOB_WATCH_SECONDS ?? 4) * 1000;
+
+/** Ids of the jobs THIS worker is running right now (so they are never mistaken for stale ones). */
+const running = new Set<string>();
+
+/** Removes everything a cancelled job may have written: its files in storage and any rows that point at them. */
+const cleanUpAfterCancel = async (baseName: string) => {
+    await deleteStorageTargets({
+        blobs: [],
+        prefixes: [
+            { container: "processed", prefix: `${baseName}/` },
+            { container: "thumbnails", prefix: `${baseName}/` },
+        ],
+    });
+    await prisma.mediaAsset.deleteMany({
+        where: { container: { in: ["processed", "thumbnails"] }, blobPath: { startsWith: `${baseName}/` } },
+    });
+};
+
+/**
+ * Dispatches one claimed job to its handler, then re-checks standard-readiness for its video.
+ *
+ * While the job runs, a watcher asks the database every few seconds whether the video still exists. When the creator
+ * deletes it (the row is gone, or hidden), the job is cancelled: ffmpeg is killed on the spot, nothing more is
+ * uploaded, and whatever was already uploaded is removed. So deleting a video that is still "processing" really does
+ * stop the worker, instead of letting it finish a long encode for a video nobody can see.
+ */
 const dispatch = async (job: Job) => {
     console.log(`Processing job ${job.id} (${job.type}) for video ${job.videoId}`);
 
-    // The creator may have deleted the video while this job sat in the queue.
-    // Don't burn CPU encoding it, and don't let a late "READY" write resurrect it.
+    // The creator may have deleted the video while this job sat in the queue. Don't burn CPU encoding it.
     const owner = await prisma.video.findUnique({
         where: { id: job.videoId },
-        select: { deletedAt: true },
+        select: { deletedAt: true, originalAsset: { select: { blobPath: true } } },
     });
     if (!owner || owner.deletedAt) {
         await JobService.markFailed(job.id, "Video deleted while job was queued");
         return;
     }
+    const baseName = owner.originalAsset ? mediaBaseName(owner.originalAsset.blobPath) : null;
+
+    const controller = new AbortController();
+    const watcher = setInterval(() => {
+        prisma.video
+            .findUnique({ where: { id: job.videoId }, select: { deletedAt: true } })
+            .then((video) => {
+                if (!video || video.deletedAt) controller.abort();
+            })
+            .catch(() => {
+                // a database hiccup must not cancel a healthy job; the next check tries again
+            });
+    }, WATCH_INTERVAL_MS);
 
     const jobStart = Date.now();
     try {
-        if (job.type === "TRANSCODE_STANDARD") await processTranscodeStandardJob(job);
-        if (job.type === "TRANSCODE_1080P") await processTranscode1080pJob(job);
-        if (job.type === "TRANSCODE_1440P") await processTranscode1440pJob(job);
-        if (job.type === "THUMBNAIL") await processThumbnailJob(job);
+        await jobContext.run({ signal: controller.signal }, async () => {
+            if (job.type === "TRANSCODE_STANDARD") await processTranscodeStandardJob(job);
+            if (job.type === "TRANSCODE_1080P") await processTranscode1080pJob(job);
+            if (job.type === "TRANSCODE_1440P") await processTranscode1440pJob(job);
+            if (job.type === "THUMBNAIL") await processThumbnailJob(job);
+        });
     } finally {
-        console.log(`[timing] job ${job.type} for video ${job.videoId} took ${((Date.now() - jobStart) / 1000).toFixed(1)}s (queued jobs run ${WORKER_CONCURRENCY} at a time)`);
+        clearInterval(watcher);
+        console.log(`[timing] job ${job.type} for video ${job.videoId} took ${((Date.now() - jobStart) / 1000).toFixed(1)}s (up to ${WORKER_CONCURRENCY} jobs run at a time)`);
+    }
+
+    // Deleted while the job was running (or in its last seconds, after the watcher's last look)?
+    const still = await prisma.video.findUnique({ where: { id: job.videoId }, select: { deletedAt: true } });
+    if (controller.signal.aborted || !still || still.deletedAt) {
+        console.log(`[worker] video ${job.videoId} was deleted while ${job.type} was running: stopped and cleaned up`);
+        if (baseName) await cleanUpAfterCancel(baseName);
+        return;
     }
 
     await markStandardReadyIfDone(job.videoId);
 };
 
+/** Runs a job to the end without ever letting an error escape (the poll loop must keep going). */
+const runJob = async (job: Job) => {
+    try {
+        await dispatch(job);
+    } catch (error) {
+        console.error(`[worker] job ${job.id} crashed:`, error);
+    } finally {
+        running.delete(job.id);
+    }
+};
+
 /**
- * One iteration of the poll loop: claim UP TO WORKER_CONCURRENCY jobs
- * (instead of just one) and run them all at the same time with
- * Promise.all. This is what turns "N sequential FFmpeg runs" into real
- * parallel encoding, without spinning up extra worker processes.
+ * One iteration of the poll loop: top the running jobs up to WORKER_CONCURRENCY. Jobs run in the background, so a
+ * long encode never holds up the others: a short video uploaded while a long film is encoding starts at once (the
+ * old loop waited for every job in its batch to finish before it looked at the queue again).
  */
 const tick = async () => {
     try {
-        const stale = await JobService.requeueStaleJobs(STALE_JOB_MS);
+        const stale = await JobService.requeueStaleJobs(STALE_JOB_MS, 2, [...running]);
         if (stale.requeued || stale.failed) console.warn(`[worker] stale jobs: ${stale.requeued} re-queued, ${stale.failed} failed`);
 
-        const claimed: Job[] = [];
-        for (let i = 0; i < WORKER_CONCURRENCY; i++) {
+        while (running.size < WORKER_CONCURRENCY) {
             const job = (await JobService.claimNextQueuedJob()) as Job | null;
             if (!job) break; // nothing else waiting right now
-            claimed.push(job);
+            running.add(job.id);
+            void runJob(job);
         }
 
-        if (claimed.length > 0) {
-            await Promise.all(claimed.map((job) => dispatch(job)));
-        }
-
-        // IMPORTANT: these must run every tick, even when zero jobs were
-        // claimed — otherwise a video sitting inside its grace window would
-        // never get re-checked once its own transcode jobs are done.
+        // These must run every tick, even when no job was claimed: a video inside its grace window has to be re-checked.
         await deliverReadyNotifications();
         await deliverHdFollowUpNotifications();
     } catch (error) {
-        // Belt-and-suspenders: even a bug in the bookkeeping above (not FFmpeg
-        // itself) shouldn't kill the whole worker process — log it and keep polling.
+        // Even a bug in the bookkeeping above (not FFmpeg itself) shouldn't kill the whole worker: log it and keep polling.
         console.error("Error in tick:", error);
     }
 };
+
+/**
+ * When the worker is stopped (the autoscaler turned it off, or a new version is being deployed), hand any job it was
+ * running back to the queue at once, so the next worker picks it up instead of waiting for it to be declared stale.
+ */
+const handBackAndExit = async () => {
+    try {
+        if (running.size > 0) {
+            await prisma.mediaProcessingJob.updateMany({
+                where: { id: { in: [...running] }, status: "RUNNING" },
+                data: { status: "QUEUED", startedAt: null },
+            });
+            console.log(`[worker] stopping: ${running.size} running job(s) handed back to the queue`);
+        }
+    } finally {
+        process.exit(0);
+    }
+};
+process.on("SIGTERM", () => void handBackAndExit());
+process.on("SIGINT", () => void handBackAndExit());
 
 /** The infinite poll loop. This is the only thing that runs when you start the worker. */
 const run = async () => {

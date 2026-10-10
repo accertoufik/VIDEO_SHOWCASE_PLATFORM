@@ -34,3 +34,16 @@ test('a video id that is too short selects no thumbnail folder', () => {
   const t = collectPurgeTargets('x', []);
   expect(t.prefixes).toHaveLength(0);
 });
+
+test('a video still being processed is covered through its ORIGINAL upload path', () => {
+  // Only the original asset exists in the database so far; the worker has already uploaded files for it.
+  const t = collectPurgeTargets(VIDEO, [{ container: 'originals', blobPath: 'dbc0eca9-519c-42ef-8587-0e02045ccc4b/4fe145b5-73e7-45ab-9bf0-d59a3a736164.mkv' }]);
+  expect(t.prefixes).toContainEqual({ container: 'processed', prefix: `${FOLDER}/` });
+  expect(t.prefixes).toContainEqual({ container: 'thumbnails', prefix: `${FOLDER}/` });
+  expect(t.blobs).toContainEqual({ container: 'originals', path: 'dbc0eca9-519c-42ef-8587-0e02045ccc4b/4fe145b5-73e7-45ab-9bf0-d59a3a736164.mkv' });
+});
+
+test('a short or odd original path never produces a folder to delete', () => {
+  const t = collectPurgeTargets(VIDEO, [{ container: 'originals', blobPath: 'a/b.mp4' }, { container: 'originals', blobPath: 'noslash.mp4' }]);
+  expect(t.prefixes.filter((p) => p.container === 'processed')).toHaveLength(0);
+});

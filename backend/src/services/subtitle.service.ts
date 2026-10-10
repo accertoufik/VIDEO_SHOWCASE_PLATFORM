@@ -2,6 +2,8 @@ import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { ffmpeg } from '../config/ffmpeg';
 import { AzureStorageService } from './azure-storage.service';
+import { languageInfo, uniqueTrackNames } from '../lib/languages';
+import { runCommand, throwIfCancelled } from '../lib/jobContext';
 
 /**
  * Subtitles that travel inside an uploaded video file (an .mkv with an English track, say) used to be dropped by
@@ -14,25 +16,6 @@ import { AzureStorageService } from './azure-storage.service';
 const TEXT_CODECS = new Set(['ass', 'ssa', 'subrip', 'srt', 'mov_text', 'webvtt', 'text']);
 const MAX_TRACKS = 5;
 const GROUP_ID = 'subs';
-
-const LANGUAGES: Record<string, { code: string; name: string }> = {
-  eng: { code: 'en', name: 'English' },
-  jpn: { code: 'ja', name: 'Japanese' },
-  spa: { code: 'es', name: 'Spanish' },
-  fre: { code: 'fr', name: 'French' },
-  fra: { code: 'fr', name: 'French' },
-  ger: { code: 'de', name: 'German' },
-  deu: { code: 'de', name: 'German' },
-  por: { code: 'pt', name: 'Portuguese' },
-  ita: { code: 'it', name: 'Italian' },
-  rus: { code: 'ru', name: 'Russian' },
-  hin: { code: 'hi', name: 'Hindi' },
-  ben: { code: 'bn', name: 'Bengali' },
-  ara: { code: 'ar', name: 'Arabic' },
-  kor: { code: 'ko', name: 'Korean' },
-  chi: { code: 'zh', name: 'Chinese' },
-  zho: { code: 'zh', name: 'Chinese' },
-};
 
 type Track = { key: string; code: string; name: string };
 
@@ -55,14 +38,7 @@ const probeSubtitleStreams = (inputPath: string) =>
   });
 
 const extractToVtt = (inputPath: string, streamIndex: number, outPath: string) =>
-  new Promise<void>((resolve, reject) => {
-    ffmpeg(inputPath)
-      .outputOptions(['-map', `0:${streamIndex}`, '-f', 'webvtt'])
-      .output(outPath)
-      .on('end', () => resolve())
-      .on('error', (error: Error) => reject(error))
-      .run();
-  });
+  runCommand(ffmpeg(inputPath).outputOptions(['-map', `0:${streamIndex}`, '-f', 'webvtt']).output(outPath), `Subtitle extraction failed (stream ${streamIndex})`);
 
 /** A one-entry VOD playlist wrapping the whole .vtt file, which is how HLS references an external subtitle file. */
 const subtitlePlaylist = (vttName: string, durationSec: number) =>
@@ -126,9 +102,15 @@ export const SubtitleService = {
 
     const durationSec = Math.max(1, params.durationMs / 1000);
     const tracks: Track[] = [];
+    // Names come from the file's language tag, then its own title ("Signs & Songs"), and are made unique.
+    const names = uniqueTrackNames(
+      streams.map((stream) => ({ language: stream.tags?.language, title: stream.tags?.title })),
+      'Subtitles',
+    );
 
     for (const [i, stream] of streams.entries()) {
-      const lang = LANGUAGES[String(stream.tags?.language ?? '').toLowerCase()];
+      throwIfCancelled();
+      const lang = languageInfo(stream.tags?.language);
       const key = `sub${i}`;
       const vttPath = join(params.workDir, `${key}.vtt`);
       try {
@@ -143,12 +125,9 @@ export const SubtitleService = {
           subtitlePlaylist(`${key}.vtt`, durationSec),
           'application/vnd.apple.mpegurl',
         );
-        tracks.push({
-          key,
-          code: lang?.code ?? String(stream.tags?.language ?? 'und'),
-          name: lang?.name ?? `Subtitles ${i + 1}`,
-        });
+        tracks.push({ key, code: lang?.code ?? 'und', name: names[i] ?? `Subtitles ${i + 1}` });
       } catch (error) {
+        if ((error as Error).name === 'JobCancelledError') throw error;
         console.warn(`Subtitle stream ${stream.index} skipped:`, (error as Error).message);
       }
     }

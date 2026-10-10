@@ -97,10 +97,12 @@ export const useDeleteVideo = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (videoId: string) => deleteVideo(api, videoId),
-    // The whole studio tree: content list, overview totals and top videos, analytics, comments.
+    // The video is gone for good, and it can sit in any cached list: the creator page and its
+    // video tabs, feeds, Shorts, trending, related, search, library, notifications and the studio.
+    // Drop its own entry and mark everything else stale so no screen keeps showing it.
     onSuccess: (_d, videoId) => {
-      void qc.invalidateQueries({ queryKey: STUDIO_KEY });
-      void qc.invalidateQueries({ queryKey: queryKeys.video(videoId) });
+      qc.removeQueries({ queryKey: queryKeys.video(videoId) });
+      void qc.invalidateQueries();
     },
   });
 };

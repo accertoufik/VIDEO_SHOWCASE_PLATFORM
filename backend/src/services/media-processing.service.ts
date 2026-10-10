@@ -6,135 +6,21 @@ import type { ContainerName } from '../config/azure';
 import { AzureStorageService } from './azure-storage.service';
 import { getDisplayDimensions } from '../lib/videoClassification';
 import { SubtitleService } from './subtitle.service';
+import { AudioService } from './audio.service';
+import { mediaBaseName } from '../lib/mediaPaths';
+import { pickAudioTracks, masterHasAudioGroup, AUDIO_GROUP, type ProbedAudioStream } from '../lib/audioTracks';
+import { currentSignal, runCommand, throwIfCancelled } from '../lib/jobContext';
+import {
+  readEncodeOptions,
+  selectHdRungs,
+  selectStandardRungs,
+  sizeRungForSource,
+  sourceTierHeight,
+  type EncodeOptions,
+  type SizedRung,
+} from '../lib/ladder';
 
-/**
- * The full quality ladder — the MAXIMUM set of rungs this platform will
- * ever produce for any video. 1440p is the hard ceiling by design: even a
- * 4K (2160p) upload never gets encoded above 1440p (a deliberate
- * cost/quality tradeoff — 1440p already covers the vast majority of
- * viewer displays, and going higher multiplies storage/encode time for
- * diminishing real-world benefit).
- *
- * The ladder is generated in TWO PHASES:
- *   - "standard" (480p + 720p) — generated first, in parallel, and is
- *     what makes a video watchable at all (status flips to READY once
- *     this and the thumbnail are done). A video can be published PUBLIC
- *     as soon as this phase is done — see VideoService.publish.
- *   - "hd" (1080p AND/OR 1440p, whichever apply) — generated afterward,
- *     in parallel with EACH OTHER, and appended to the SAME master
- *     manifest once ready. Purely additive: existing viewers/players
- *     aren't interrupted, the manifest just grows.
- * See selectStandardRungs() / selectHdRungs() below for the exact rules.
- */
-const QUALITY_LADDER = [
-  { label: '480p', width: 854, height: 480, bitrateKbps: 1400 },
-  { label: '720p', width: 1280, height: 720, bitrateKbps: 2900 },
-  { label: '1080p', width: 1920, height: 1080, bitrateKbps: 6000 },
-  { label: '1440p', width: 2560, height: 1440, bitrateKbps: 10000 },
-] as const;
-
-type Rung = (typeof QUALITY_LADDER)[number];
-
-/**
- * A ladder rung fitted to ONE specific source. The ladder labels ("480p",
- * "1080p") name the SHORTER side of the picture — YouTube's convention, so a
- * 1080x1920 Short is a "1080p" video. outWidth/outHeight are the real
- * pixel dimensions after preserving the source's aspect ratio.
- */
-
-type SizedRung = Omit<Rung, 'bitrateKbps'> & {
-  /** The bitrate this rung is ENCODED at (the ladder value, or lower when capped to the source's own bitrate). */
-  bitrateKbps: number;
-  outWidth: number;
-  outHeight: number;
-};
-
-/**
- * Encoding knobs. The defaults are the tested ones (about 4x faster on a 4-CPU container, with near-identical
- * picture quality: SSIM stays above 0.98). Each can be overridden from the environment, e.g. to run an experiment:
- *   ENCODE_PRESET         libx264 speed preset. Default "veryfast"; "medium" is the old, much slower setting.
- *   ENCODE_SINGLE_PASS    Default on. The 480p + 720p rungs come out of ONE FFmpeg run (the video is decoded once);
- *                         set "false" to encode each rung in its own run.
- *   BITRATE_CAP_FACTOR    Default 1.5: a rung is never encoded above 1.5x the SOURCE's own bitrate, because encoding
- *                         a 2 Mbps source at 6 Mbps only makes the files bigger, not better. Set "0" to turn it off.
- */
-export type EncodeOptions = { preset: string; singlePass: boolean; bitrateCapFactor: number };
-const MIN_CAPPED_KBPS = 400;
-
-export const readEncodeOptions = (): EncodeOptions => {
-  const cap = Number(process.env.BITRATE_CAP_FACTOR ?? 1.5);
-  return {
-    preset: process.env.ENCODE_PRESET || 'veryfast',
-    singlePass: process.env.ENCODE_SINGLE_PASS !== 'false',
-    bitrateCapFactor: Number.isFinite(cap) && cap > 0 ? cap : 0,
-  };
-};
-
-/** The ladder bitrate, lowered to `factor x source bitrate` when a cap is on (never below a sane floor). */
-const capBitrate = (ladderKbps: number, sourceKbps: number | undefined, factor: number) => {
-  if (!factor || !sourceKbps || sourceKbps <= 0) return ladderKbps;
-  return Math.max(MIN_CAPPED_KBPS, Math.min(ladderKbps, Math.round(sourceKbps * factor)));
-};
-
-//H.264 needs even dimensions, so we round down to the nearest even number.
-const toEven = (n: number): number => Math.max(2, Math.floor(n / 2) * 2);
-
-const sizeRungForSource = (
-  rung: Rung,
-  source: { width: number; height: number; bitrateKbps?: number },
-  options: EncodeOptions = readEncodeOptions(),
-): SizedRung => {
-  const bitrateKbps = capBitrate(rung.bitrateKbps, source.bitrateKbps, options.bitrateCapFactor);
-  const isPortrait = source.height > source.width;
-  if (isPortrait) {
-    const outWidth = rung.height;
-    return { ...rung, bitrateKbps, outWidth, outHeight: toEven((outWidth * source.height) / source.width) };
-  }
-
-  //landscape/square: rung's number is the height, width is scaled to preserve aspect ratio.
-  const outHeight = rung.height;
-  return { ...rung, bitrateKbps, outWidth: toEven((outHeight * source.width) / source.height), outHeight };
-};
-
-/**
- * The 480p/720p half of the ladder:
- *   - Never upscale: a rung only generates if its height is <= source height.
- *   - A 720p (or taller) source gets [720p, 480p] — 720p native.
- *   - A 480p source gets [480p] only.
- *   - Anything smaller than 480p falls back to a single (slightly
- *     upscaled) 480p rung rather than leaving the video with zero
- *     playable rungs.
- */
-const selectStandardRungs = (sourceShortsSide: number): Rung[] => {
-  const effectiveMaxHeight = Math.min(sourceShortsSide, 720);
-  const rungs = QUALITY_LADDER.filter(
-    (rung) => rung.label === '480p' || rung.label === '720p',
-  ).filter((rung) => rung.height <= effectiveMaxHeight);
-
-  if (rungs.length === 0) return [QUALITY_LADDER[0]];
-  return rungs;
-};
-
-/**
- * The HD half — now up to TWO rungs (1080p, 1440p), not just one.
- *   - Never upscale, same as always: a rung only generates if its height
- *     is <= source height.
- *   - Never exceed 1440p: a source above 1440p (e.g. 4K/2160p) still gets
- *     CAPPED at 1440p as its top rung (a downscale, never native above
- *     that) — min() below is what enforces this.
- *   - A source >= 1440p gets BOTH [1080p, 1440p] — 1440p native.
- *   - A source >= 1080p but < 1440p gets [1080p] only — 1080p native, no
- *     1440p (that would be upscaling).
- *   - A source below 1080p (720p, 480p) gets [] — empty. Its standard
- *     rungs already ARE its native/full quality; there's nothing above
- *     them to honestly generate.
- */
-const selectHdRungs = (sourceShortsSide: number): Rung[] => {
-  const effectiveMaxHeight = Math.min(sourceShortsSide, 1440);
-  return QUALITY_LADDER.filter(
-    (rung) => rung.label === '1080p' || rung.label === '1440p',
-  ).filter((rung) => rung.height <= effectiveMaxHeight);
-};
+export { readEncodeOptions, type EncodeOptions } from '../lib/ladder';
 
 /**
  * FFmpeg is a command-line program — it reads and writes real files on
@@ -142,6 +28,8 @@ const selectHdRungs = (sourceShortsSide: number): Rung[] => {
  * do anything, we have to pull the original video out of Blob Storage
  * and save it to a temp file on the worker's own disk.
  */
+export { mediaBaseName };
+
 /** Seconds with one decimal, for the [timing] log lines (read these to see where the time goes). */
 const secs = (startMs: number) => ((Date.now() - startMs) / 1000).toFixed(1);
 
@@ -156,7 +44,7 @@ const downloadToTemp = async (
       blobPath,
     );
     const started = Date.now();
-    await blockBlobClient.downloadToFile(destPath);
+    await blockBlobClient.downloadToFile(destPath, 0, undefined, { abortSignal: currentSignal() });
     const bytes = (await stat(destPath)).size;
     const took = Math.max(0.001, (Date.now() - started) / 1000);
     console.log(
@@ -187,10 +75,18 @@ const hlsOutputOptions = (preset: string) => [
   '-f', 'hls',
 ];
 
-/** Adds one HLS rung output (its own scale, bitrate and playlist) to an FFmpeg command. */
-const addRungOutput = (command: ReturnType<typeof ffmpeg>, outputPath: string, rung: SizedRung, preset: string) =>
+/** Which streams of the source go into a rung: the real video stream and the file's default audio track. */
+type StreamPick = { videoIndex: number; audioIndex: number | null };
+
+/**
+ * Adds one HLS rung output (its own scale, bitrate and playlist) to an FFmpeg command. The streams are mapped
+ * EXPLICITLY: without that FFmpeg picks its own audio (the one with the most channels, e.g. an English 5.1 dub over
+ * the original Japanese stereo) and could pick a cover-art picture as the "video".
+ */
+const addRungOutput = (command: ReturnType<typeof ffmpeg>, outputPath: string, rung: SizedRung, preset: string, pick: StreamPick) =>
   command
     .output(outputPath)
+    .outputOptions(['-map', `0:${pick.videoIndex}`, ...(pick.audioIndex != null ? ['-map', `0:${pick.audioIndex}`] : [])])
     .videoCodec('libx264')
     .audioCodec('aac')
     .videoFilters(`scale=${rung.outWidth}:${rung.outHeight}`)
@@ -201,19 +97,9 @@ const runFfmpegEncode = async (
   inputPath: string,
   outputPath: string,
   rung: SizedRung,
+  pick: StreamPick,
   preset: string = readEncodeOptions().preset,
-) => {
-  return new Promise<void>((resolve, reject) => {
-    addRungOutput(ffmpeg(inputPath), outputPath, rung, preset)
-      .on('end', () => resolve())
-      .on('error', (err) =>
-        reject(
-          new Error(`FFmpeg encode failed for ${rung.label}:${err.message}`),
-        ),
-      )
-      .run();
-  });
-};
+) => runCommand(addRungOutput(ffmpeg(inputPath), outputPath, rung, preset, pick), `FFmpeg encode failed for ${rung.label}`);
 
 /**
  * ONE FFmpeg run with several outputs: the source is read and decoded once, then each rung scales and encodes its own
@@ -223,18 +109,12 @@ const runFfmpegEncodeTogether = async (
   inputPath: string,
   workDir: string,
   rungs: SizedRung[],
+  pick: StreamPick,
   preset: string,
 ) => {
-  return new Promise<void>((resolve, reject) => {
-    const command = ffmpeg(inputPath);
-    for (const rung of rungs) addRungOutput(command, join(workDir, `${rung.label}.m3u8`), rung, preset);
-    command
-      .on('end', () => resolve())
-      .on('error', (err) =>
-        reject(new Error(`FFmpeg encode failed for ${rungs.map((r) => r.label).join('+')}: ${err.message}`)),
-      )
-      .run();
-  });
+  const command = ffmpeg(inputPath);
+  for (const rung of rungs) addRungOutput(command, join(workDir, `${rung.label}.m3u8`), rung, preset, pick);
+  return runCommand(command, `FFmpeg encode failed for ${rungs.map((r) => r.label).join('+')}`);
 };
 
 /**
@@ -244,7 +124,11 @@ const runFfmpegEncodeTogether = async (
  */
 
 interface RawProbeStream {
-   codec_type?: string;
+  index?: number;
+  codec_type?: string;
+  codec_name?: string;
+  channels?: number;
+  disposition?: { default?: number; attached_pic?: number };
   height?: number;
   width?: number;
   rotation?: string | number;
@@ -262,9 +146,17 @@ const readRotation = (stream: RawProbeStream): number => {
 };
 
 
-const probeSourceMetadata = async (
-  inputPath: string,
-): Promise<{ width: number;  height: number; durationMs: number; bitrateKbps?: number }> => {
+export type SourceMetadata = {
+  width: number;
+  height: number;
+  durationMs: number;
+  bitrateKbps?: number;
+  /** Absolute index of the real video stream (never an attached cover picture). */
+  videoIndex: number;
+  audioStreams: ProbedAudioStream[];
+};
+
+const probeSourceMetadata = async (inputPath: string): Promise<SourceMetadata> => {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(inputPath, (err, metadata) => {
       if (err) {
@@ -273,9 +165,9 @@ const probeSourceMetadata = async (
         );
         return;
       }
-      const videoStream = metadata.streams.find(
-        (stream) => stream.codec_type === 'video',
-      ) as unknown as RawProbeStream | undefined;
+      const videoStream = (metadata.streams as unknown as RawProbeStream[]).find(
+        (stream) => stream.codec_type === 'video' && stream.disposition?.attached_pic !== 1,
+      );
 
       if (!videoStream?.width || !videoStream?.height) {
         reject(
@@ -300,7 +192,24 @@ const probeSourceMetadata = async (
       const bitsPerSecond = Number(metadata.format?.bit_rate ?? (videoStream as { bit_rate?: string | number }).bit_rate ?? 0);
       const bitrateKbps = Number.isFinite(bitsPerSecond) && bitsPerSecond > 0 ? Math.round(bitsPerSecond / 1000) : undefined;
 
-      resolve({ width: display.width, height: display.height, durationMs, bitrateKbps });
+      const audioStreams: ProbedAudioStream[] = (metadata.streams as unknown as RawProbeStream[])
+        .filter((stream) => stream.codec_type === 'audio' && typeof stream.index === 'number')
+        .map((stream) => ({
+          index: stream.index as number,
+          codec_name: stream.codec_name,
+          channels: stream.channels,
+          tags: stream.tags as Record<string, string | undefined> | undefined,
+          disposition: stream.disposition,
+        }));
+
+      resolve({
+        width: display.width,
+        height: display.height,
+        durationMs,
+        bitrateKbps,
+        videoIndex: videoStream.index ?? 0,
+        audioStreams,
+      });
     });
   });
 };
@@ -313,8 +222,8 @@ const probeSourceMetadata = async (
  * 1080x1920, not 1920x1080), so a player picking a rung by resolution sees
  * the real shape.
  */
-const masterManifestLine = (rung: SizedRung, withSubtitles = false) =>
-  `#EXT-X-STREAM-INF:BANDWIDTH=${rung.bitrateKbps * 1000},RESOLUTION=${rung.outWidth}x${rung.outHeight}${withSubtitles ? ',SUBTITLES="subs"' : ''}\n${rung.label}/playlist.m3u8`;
+const masterManifestLine = (rung: SizedRung, withSubtitles = false, withAudio = false) =>
+  `#EXT-X-STREAM-INF:BANDWIDTH=${rung.bitrateKbps * 1000},RESOLUTION=${rung.outWidth}x${rung.outHeight}${withSubtitles ? ',SUBTITLES="subs"' : ''}${withAudio ? `,AUDIO="${AUDIO_GROUP}"` : ''}\n${rung.label}/playlist.m3u8`;
 
 const buildMasterManifestText = (rungs: SizedRung[]) =>
   ['#EXTM3U', ...rungs.map((rung) => masterManifestLine(rung))].join('\n');
@@ -366,7 +275,9 @@ const upsertMasterManifest = async (
 
       // If subtitles were already published into this master, new rungs must point at them too.
       const withSubtitles = content.includes('GROUP-ID="subs"');
-      const updated = `${content}\n${missing.map((rung) => masterManifestLine(rung, withSubtitles)).join('\n')}`;
+      // Same for the alternate-audio group: a rung added later (HD) must point at it too.
+      const withAudio = masterHasAudioGroup(content);
+      const updated = `${content}\n${missing.map((rung) => masterManifestLine(rung, withSubtitles, withAudio)).join('\n')}`;
 
       try {
         await AzureStorageService.uploadTextIfMatch(
@@ -420,11 +331,12 @@ const encodeAndUploadRung = async (
   workDir: string,
   baseName: string,
   rung: SizedRung,
+  pick: StreamPick,
   preset: string = readEncodeOptions().preset,
 ) => {
   const outputPath = join(workDir, `${rung.label}.m3u8`);
   const encodeStart = Date.now();
-  await runFfmpegEncode(inputPath, outputPath, rung, preset);
+  await runFfmpegEncode(inputPath, outputPath, rung, pick, preset);
   console.log(`[timing] ffmpeg ${rung.label} (${preset}, ${rung.bitrateKbps} kbps): ${secs(encodeStart)}s`);
   return uploadEncodedRung(workDir, baseName, rung, outputPath);
 };
@@ -456,6 +368,7 @@ const uploadEncodedRung = async (
   const segmentPattern = new RegExp(`^${rung.label}\\d*\\.ts$`);
   const files = await readdir(workDir);
   for (const file of files.filter((f) => segmentPattern.test(f))) {
+    throwIfCancelled(); // a deleted video stops uploading at once
     const segmentContent = await readFile(join(workDir, file));
     const segmentBlobPath = `${baseName}/${rung.label}/${file}`;
     const blockBlobClient = AzureStorageService.getBlockBlobClient(
@@ -485,21 +398,26 @@ const uploadEncodedRung = async (
   };
 };
 
-/** Grabs a single frame from the video as a JPEG, 5 seconds in (skips black intro frames). */
-const runFfmpegThumbnail = async (inputPath: string, outputFolder: string) => {
-  return new Promise<void>((resolve, reject) => {
-    ffmpeg(inputPath)
-      .screenshots({
-        timestamps: ['5'],
-        filename: 'thumbnail.jpg',
-        folder: outputFolder,
-      })
-      .on('end', () => resolve())
-      .on('error', (err) =>
-        reject(new Error(`Failed to generate thumbnail: ${err.message}`)),
-      );
-  });
+/**
+ * Where to grab the thumbnail frame: 5 seconds in (skips black intro frames), but for a clip shorter than 20 s a
+ * quarter of the way in. A fixed 5 s seeks PAST the end of a short clip, which produced no frame at all and made
+ * the thumbnail job (and so the whole video) fail.
+ */
+export const thumbnailSecond = (durationMs: number) => {
+  const seconds = durationMs / 1000;
+  if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+  return seconds >= 20 ? 5 : Math.round(seconds * 0.25 * 10) / 10;
 };
+
+/** Grabs a single frame from the video as a JPEG (see thumbnailSecond for where). */
+const runFfmpegThumbnail = async (inputPath: string, outputFolder: string, source: SourceMetadata) =>
+  runCommand(
+    ffmpeg(inputPath)
+      .seekInput(thumbnailSecond(source.durationMs))
+      .output(join(outputFolder, 'thumbnail.jpg'))
+      .outputOptions(['-map', `0:${source.videoIndex}`, '-frames:v', '1', '-q:v', '2']),
+    'Failed to generate thumbnail',
+  );
 
 export const MediaProcessingService = {
   /**
@@ -518,16 +436,22 @@ export const MediaProcessingService = {
       const probeStart = Date.now();
       const source = await probeSourceMetadata(inputPath);
       console.log(`[timing] probe: ${secs(probeStart)}s (${source.width}x${source.height}, ${Math.round(source.durationMs / 1000)}s long)`);
-      const sourceShortSide = Math.min(source.width, source.height);
+      const tier = sourceTierHeight(source.width, source.height);
       const options = readEncodeOptions();
-      const rungs = selectStandardRungs(sourceShortSide).map((rung) => sizeRungForSource(rung, source, options));
-      const baseName = originalBlobPath.replace(/[\/\.]/g, '-');
+      const rungs = selectStandardRungs(tier).map((rung) => sizeRungForSource(rung, source, options));
+      const baseName = mediaBaseName(originalBlobPath);
+      // The file's default audio goes into every rung; any other audio tracks are published separately below.
+      const { primary, extras } = pickAudioTracks(source.audioStreams);
+      const pick: StreamPick = { videoIndex: source.videoIndex, audioIndex: primary?.index ?? null };
+      if (source.audioStreams.length > 1) {
+        console.log(`[audio] ${source.audioStreams.length} audio tracks: default "${primary?.name}", extras: ${extras.map((t) => t.name).join(', ') || 'none'}`);
+      }
 
       let variants;
       if (options.singlePass && rungs.length > 1) {
         // One decode feeds every rung; then the finished rungs are uploaded.
         const started = Date.now();
-        await runFfmpegEncodeTogether(inputPath, workDir, rungs, options.preset);
+        await runFfmpegEncodeTogether(inputPath, workDir, rungs, pick, options.preset);
         console.log(
           `[timing] ffmpeg ${rungs.map((r) => `${r.label} @${r.bitrateKbps}k`).join(' + ')} (single pass, ${options.preset}): ${secs(started)}s`,
         );
@@ -536,7 +460,7 @@ export const MediaProcessingService = {
         );
       } else {
         variants = await Promise.all(
-          rungs.map((rung) => encodeAndUploadRung(inputPath, workDir, baseName, rung, options.preset)),
+          rungs.map((rung) => encodeAndUploadRung(inputPath, workDir, baseName, rung, pick, options.preset)),
         );
       }
 
@@ -546,6 +470,26 @@ export const MediaProcessingService = {
       // WORKER_CONCURRENCY), so this can no longer assume it's always the
       // first writer.
       await upsertMasterManifest(masterBlobPath, rungs);
+
+      // Other audio tracks (a "dual audio" file): each becomes an alternate audio rendition the player can switch to.
+      // A failure here is not fatal: the video plays with its default audio.
+      if (primary && extras.length > 0) {
+        try {
+          const published = await AudioService.publishExtras({
+            inputPath,
+            workDir,
+            baseName,
+            masterBlobPath,
+            primary,
+            extras,
+            referenceSegment: join(workDir, `${rungs[0]?.label}0.ts`),
+          });
+          if (published > 0) console.log(`Published ${published} extra audio track(s) for ${originalBlobPath}`);
+        } catch (error) {
+          if ((error as Error).name === 'JobCancelledError') throw error;
+          console.warn(`Extra audio skipped for ${originalBlobPath}:`, (error as Error).message);
+        }
+      }
 
       // Subtitle tracks inside the upload (e.g. an .mkv with English captions) become a captions menu in the player.
       try {
@@ -567,7 +511,7 @@ export const MediaProcessingService = {
       // skip the non-qualifying HD job(s) outright instead of letting
       // them download the whole source a second time and run ffprobe
       // just to discover the same thing themselves.
-      const hdRungsNeeded = selectHdRungs(sourceShortSide).map((rung) => rung.label);
+      const hdRungsNeeded = selectHdRungs(tier).map((rung) => rung.label);
 
       // width/height/durationMs travel back to the worker, which classifies + stores them.
       return {
@@ -614,9 +558,9 @@ export const MediaProcessingService = {
       await downloadToTemp('originals', originalBlobPath, inputPath);
 
       const source = await probeSourceMetadata(inputPath);
-      const sourceShortSide = Math.min(source.width, source.height);
+      const tier = sourceTierHeight(source.width, source.height);
       const matchedRung =
-        selectHdRungs(sourceShortSide).find(
+        selectHdRungs(tier).find(
           (candidate) => candidate.label === label,
         ) ?? null;
 
@@ -628,12 +572,15 @@ export const MediaProcessingService = {
       const options = readEncodeOptions();
       const rung = sizeRungForSource(matchedRung, source, options);
 
-      const baseName = originalBlobPath.replace(/[\/\.]/g, '-');
+      const baseName = mediaBaseName(originalBlobPath);
+      // The same default audio track the standard rungs use, picked by the same rule from the same file.
+      const { primary } = pickAudioTracks(source.audioStreams);
       const variant = await encodeAndUploadRung(
         inputPath,
         workDir,
         baseName,
         rung,
+        { videoIndex: source.videoIndex, audioIndex: primary?.index ?? null },
         options.preset,
       );
 
@@ -652,9 +599,9 @@ export const MediaProcessingService = {
     try {
       const inputPath = join(workDir, 'original.mp4');
       await downloadToTemp('originals', originalBlobPath, inputPath);
-      await runFfmpegThumbnail(inputPath, workDir);
+      await runFfmpegThumbnail(inputPath, workDir, await probeSourceMetadata(inputPath));
       const thumbnailContent = await readFile(join(workDir, 'thumbnail.jpg'));
-      const baseName = originalBlobPath.replace(/[\/\.]/g, '-');
+      const baseName = mediaBaseName(originalBlobPath);
       const thumbnailBlobPath = `${baseName}/thumbnail.jpg`;
       const blockBlobClient = AzureStorageService.getBlockBlobClient(
         'thumbnails',

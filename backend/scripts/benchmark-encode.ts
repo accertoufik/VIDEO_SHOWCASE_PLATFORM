@@ -63,7 +63,8 @@ try {
   const whole = await E.probeSourceMetadata(file);
   const source = { ...(await E.probeSourceMetadata(sample)), bitrateKbps: whole.bitrateKbps };
   const short = Math.min(source.width, source.height);
-  const ladder = [...E.selectStandardRungs(short), ...(withHd ? E.selectHdRungs(short) : [])];
+  const tier = Math.max(source.height, Math.round((source.width * 9) / 16));
+  const ladder = [...E.selectStandardRungs(tier), ...(withHd ? E.selectHdRungs(tier) : [])];
   console.log(`\nSample: ${seconds}s of "${file.split('/').pop()}" — ${source.width}x${source.height}, source bitrate ~${source.bitrateKbps ?? '?'} kbps`);
   console.log(`Rungs: ${ladder.map((r) => r.label).join(', ')}   (CPU threads: ${(await import('node:os')).cpus().length})\n`);
 
@@ -71,9 +72,10 @@ try {
   for (const { name, options } of CONFIGS) {
     const dir = await mkdtemp(join(work, 'run-'));
     const rungs = ladder.map((r) => E.sizeRungForSource(r, source, options));
+    const pick = { videoIndex: source.videoIndex, audioIndex: source.audioStreams[0]?.index ?? null };
     const started = Date.now();
-    if (options.singlePass && rungs.length > 1) await E.runFfmpegEncodeTogether(sample, dir, rungs, options.preset);
-    else await Promise.all(rungs.map((r) => E.runFfmpegEncode(sample, join(dir, `${r.label}.m3u8`), r, options.preset)));
+    if (options.singlePass && rungs.length > 1) await E.runFfmpegEncodeTogether(sample, dir, rungs, pick, options.preset);
+    else await Promise.all(rungs.map((r) => E.runFfmpegEncode(sample, join(dir, `${r.label}.m3u8`), r, pick, options.preset)));
     const took = (Date.now() - started) / 1000;
 
     console.log(`${name}\n  encode time: ${took.toFixed(1)}s  (${(seconds / took).toFixed(2)}x realtime)`);

@@ -96,7 +96,7 @@ export const EditVideoSheet = ({ video, onClose }: Props) => {
   const confirmDelete = () =>
     Alert.alert(
       'Delete this video?',
-      "It will be removed for everyone, including from followers' lists. You can't undo this from the app.",
+      "This permanently deletes the video with its likes, comments, shares and analytics. If it is still processing, processing stops. This can't be undone.",
       [
         { text: 'Cancel', style: 'cancel' },
         {

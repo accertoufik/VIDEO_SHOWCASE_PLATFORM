@@ -95,7 +95,7 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
   );
   const [menuOpen, setMenuOpen] = useState(false);
   // The settings dropdown: a main list (Playback speed / Quality) that opens one option list at a time.
-  const [menuPage, setMenuPage] = useState<'main' | 'quality' | 'speed' | 'subtitles'>('main');
+  const [menuPage, setMenuPage] = useState<'main' | 'quality' | 'speed' | 'subtitles' | 'audio'>('main');
   const [speed, setSpeed] = useState(1);
   const [loadFailed, setLoadFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -254,6 +254,35 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
     setLiveHeight(h && h > 0 ? h : null);
   });
   useEventListener(player, 'subtitleTrackChange', forceNativeCaptionsOff);
+
+  // Audio languages. A file with dual audio lists them in the master playlist; the player reports them here.
+  // Only shown when there is a real choice (two or more).
+  const readAudio = useCallback(() => {
+    try {
+      const list = (player.availableAudioTracks ?? []).map((t, i) => ({
+        key: String(t.id ?? i),
+        label: t.label || t.language || `Track ${i + 1}`,
+      }));
+      const current = player.audioTrack;
+      const idx = current ? (player.availableAudioTracks ?? []).findIndex((t) => t.id === current.id) : -1;
+      return { list, activeKey: idx >= 0 ? list[idx]?.key ?? null : null };
+    } catch {
+      return { list: [], activeKey: null as string | null };
+    }
+  }, [player]);
+  const [audio, setAudio] = useState(readAudio);
+  useEffect(() => setAudio(readAudio()), [readAudio]);
+  useEventListener(player, 'availableAudioTracksChange', () => setAudio(readAudio()));
+  useEventListener(player, 'audioTrackChange', () => setAudio(readAudio()));
+  const pickAudio = (key: string) => {
+    try {
+      const track = (player.availableAudioTracks ?? []).find((t, i) => String(t.id ?? i) === key);
+      if (track) player.audioTrack = track;
+    } catch {
+      // player already released
+    }
+    setAudio(readAudio());
+  };
 
   useEffect(() => {
     const track = subtitleTracks.find((t) => t.key === captionKey);
@@ -692,6 +721,23 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
                 </AppText>
                 <Ionicons name='chevron-forward' size={18} color={colors.text.muted} />
               </Pressable>
+              {audio.list.length > 1 ? (
+                <Pressable
+                  onPress={() => setMenuPage('audio')}
+                  style={styles.sheetRow}
+                  accessibilityRole='menuitem'
+                  accessibilityLabel='Audio language'
+                >
+                  <Ionicons name='volume-high-outline' size={22} color={colors.text.secondary} />
+                  <AppText variant='title' style={styles.sheetRowLabel}>
+                    Audio
+                  </AppText>
+                  <AppText variant='body' color='muted'>
+                    {audio.list.find((a) => a.key === audio.activeKey)?.label ?? ''}
+                  </AppText>
+                  <Ionicons name='chevron-forward' size={18} color={colors.text.muted} />
+                </Pressable>
+              ) : null}
               {subtitleTracks.length > 0 ? (
                 <Pressable
                   onPress={() => setMenuPage('subtitles')}
@@ -726,10 +772,35 @@ export const VideoPlayer = ({ video, viewer, onBack }: Props) => {
                     ? 'Playback speed'
                     : menuPage === 'subtitles'
                       ? 'Subtitles'
-                      : 'Quality'}
+                      : menuPage === 'audio'
+                        ? 'Audio'
+                        : 'Quality'}
                 </AppText>
               </Pressable>
-              {menuPage === 'subtitles' ? (
+              {menuPage === 'audio' ? (
+                <>
+                  {audio.list.map((option) => {
+                    const selected = audio.activeKey === option.key;
+                    return (
+                      <Pressable
+                        key={option.key}
+                        onPress={() => {
+                          pickAudio(option.key);
+                          closeSettings();
+                        }}
+                        style={styles.sheetRow}
+                        accessibilityRole='menuitem'
+                        accessibilityState={{ selected }}
+                      >
+                        <AppText variant='title' color={selected ? 'accent' : 'primary'} style={styles.sheetRowLabel}>
+                          {option.label}
+                        </AppText>
+                        {selected ? <Ionicons name='checkmark' size={20} color={colors.accent.text} /> : null}
+                      </Pressable>
+                    );
+                  })}
+                </>
+              ) : menuPage === 'subtitles' ? (
                 <>
                   {[{ key: '', label: 'Off' }, ...subtitleTracks.map((t) => ({ key: trackKey(t), label: t.label }))].map(
                     (option) => {

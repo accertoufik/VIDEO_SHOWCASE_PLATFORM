@@ -1,3 +1,5 @@
+import { looksLikeVideoFolder, mediaBaseName } from './mediaPaths';
+
 /**
  * Works out which storage files belong to ONE deleted video, from that video's own asset records. Pure (no I/O) so it
  * can be tested. Nothing outside the video's own records is ever selected.
@@ -11,9 +13,6 @@ export type PurgeTargets = {
   prefixes: Array<{ container: string; prefix: string }>;
 };
 
-// The folder a video's processed files live in is "<creator>-<upload id>-<ext>" (a UUID pair): always long. This
-// refuses anything short or empty, so a malformed record can never turn into "delete everything".
-const looksLikeVideoFolder = (name: string) => name.length >= 36 && name.includes('-') && !name.includes('..');
 
 export const collectPurgeTargets = (videoId: string, assets: PurgeAsset[]): PurgeTargets => {
   const blobs = new Map<string, { container: string; path: string }>();
@@ -22,6 +21,16 @@ export const collectPurgeTargets = (videoId: string, assets: PurgeAsset[]): Purg
   for (const a of assets) {
     if (!a.blobPath || a.blobPath.startsWith('/') || a.blobPath.includes('..')) continue;
     blobs.set(`${a.container}/${a.blobPath}`, { container: a.container, path: a.blobPath });
+
+    // The ORIGINAL upload names the video's processed folder, even before any processed file is recorded in the
+    // database (a video that is still encoding has uploaded files but no rows for them yet).
+    if (a.container === 'originals' && a.blobPath.includes('/')) {
+      const folder = mediaBaseName(a.blobPath);
+      if (looksLikeVideoFolder(folder)) {
+        prefixes.set(`processed/${folder}/`, { container: 'processed', prefix: `${folder}/` });
+        prefixes.set(`thumbnails/${folder}/`, { container: 'thumbnails', prefix: `${folder}/` });
+      }
+    }
 
     if (a.container === 'processed') {
       const folder = a.blobPath.split('/')[0] ?? '';

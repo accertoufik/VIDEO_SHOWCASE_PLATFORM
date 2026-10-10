@@ -415,7 +415,7 @@ videosRouter.post(
   }),
 );
 
-//delete video owner only soft delete
+// Delete a video (owner only). Permanent and immediate: see VideoDeleteService.
 videosRouter.delete(
   '/videos/:videoId',
   authenticateUser,

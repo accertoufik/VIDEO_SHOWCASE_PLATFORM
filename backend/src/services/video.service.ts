@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { VideoDeleteService } from './video-delete.service';
 import { prisma } from '../config/db';
 import { ApiError } from '../middleware/errorHandler';
 import { AzureStorageService } from './azure-storage.service';
@@ -431,33 +432,20 @@ export const VideoService = {
   },
 
   /**
-   * Owner-only SOFT delete. Every read path already filters deletedAt, so this
-   * removes the video from feed, shorts, search, trending, related, channel
-   * pages, saved/liked/history and playback. Queued encode jobs are cancelled;
-   * a job already RUNNING is ignored by the worker's deleted-video guard.
-   * Azure blobs are NOT purged (kept recoverable; a cleanup job can reclaim later).
+   * Owner-only PERMANENT delete. The video, its likes, comments, shares, saves, history, notifications, versions and
+   * encode jobs are removed from the database at once (so it disappears from the feed, channel page and studio), and
+   * its stored files are removed right after. A worker that is still encoding it stops. See VideoDeleteService.
    */
-
-  deleteVideo: async(clerkUserId: string, videoId: string) => {
+  deleteVideo: async (clerkUserId: string, videoId: string) => {
     try {
       const { creatorProfile } = await requireCreatorProfile(clerkUserId);
-      const video = await prisma.video.findUnique({ where: { id: videoId } });
+      const video = await prisma.video.findUnique({ where: { id: videoId }, select: { id: true, creatorId: true } });
       if (!video || video.creatorId !== creatorProfile.id) {
         throw new ApiError(404, 'Video not found');
       }
 
-      await prisma.$transaction([
-        prisma.video.update({
-          where: { id: videoId },
-          data: { deletedAt: new Date(), status: 'DELETED', visibility: 'PRIVATE' },
-        }),
-        prisma.mediaProcessingJob.updateMany({
-          where: { videoId, status: { in: ['QUEUED', 'RETRYING'] } },
-          data: { status: 'FAILED', completedAt: new Date(), errorMessage: 'Video deleted by owner' },
-        }),
-      ]);
-
-      return {deleted: true, videoId};
+      await VideoDeleteService.hardDelete(videoId, { background: true });
+      return { deleted: true, videoId };
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(500, 'Failed to delete video', error);

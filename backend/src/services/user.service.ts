@@ -1,4 +1,5 @@
 import { prisma } from "../config/db";
+import { purgeDeletedVideos } from "./purge.service";
 import { clerkClient } from "../config/clerk";
 import { ApiError } from "../middleware/errorHandler";
 
@@ -63,8 +64,8 @@ export const UserService = {
     },
 
     /**
-     * The signed-in user deletes their own account. The database side is a soft delete (the account is deactivated,
-     * and a creator's channel is suspended and its videos removed from every list), then the Clerk login itself is
+     * The signed-in user deletes their own account. The account is deactivated and a creator's channel is suspended; the
+     * creator's videos are hidden at once and then deleted for good, with their files (see purge.service), then the Clerk login itself is
      * deleted so the account can't sign in again. Safe to repeat: every step is idempotent, so a retry after a
      * partial failure just finishes the job.
      */
@@ -95,6 +96,8 @@ export const UserService = {
                     : []),
             ]);
         }
+        // The creator's videos were only hidden by the transaction above: remove them (and their files) for good, now.
+        void purgeDeletedVideos().catch(() => {});
         try {
             await clerkClient.users.deleteUser(clerkUserId);
         } catch (error: any) {
